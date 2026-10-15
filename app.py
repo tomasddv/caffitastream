@@ -4,6 +4,7 @@ import base64
 import html
 import tempfile
 import os
+import re
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -12,6 +13,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from padron import cargar_padron
+from reporte_clientes import REPORTE_CLIENTES_ID, leer_reporte_clientes_xlsx, enriquecer_padron_1890
 from motor import (
     DIA_ID,BULTOS_ID,NOMBRES,OBJETIVOS,leer_tsv,prepare,compute_sales,
     detalle_tbd_ung,detalle_innovaciones,validate_reconciliation,promotor_breakdown,
@@ -85,6 +87,12 @@ def load_both():
     if not ok:
         raise ValueError('Fuente desactualizada: '+exp+' El tablero no mostrará cifras inconsistentes.')
     return vol,bul
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_reporte_clientes():
+    # Misma fuente de Drive, archivo XLSX. Nunca se guarda una copia de clientes en GitHub.
+    return leer_reporte_clientes_xlsx(drive_txt(REPORTE_CLIENTES_ID))
 
 
 def picture(k):
@@ -186,9 +194,9 @@ padron=cargar_padron()
 
 with st.sidebar:
     st.header('Actualización')
-    st.caption('Fuentes: ventadiaria.txt y ventadiaria bultos.txt · Google Drive')
+    st.caption('Fuentes: ventadiaria.txt, ventadiaria bultos.txt y REPORTE DE CLIENTES.xlsx · Google Drive')
     if st.button('🔄 Actualizar desde Drive',use_container_width=True):
-        drive_txt.clear(); load_both.clear(); st.rerun()
+        drive_txt.clear(); load_both.clear(); load_reporte_clientes.clear(); st.rerun()
     st.caption('Se lee al abrir y con Actualizar desde Drive. La caché vence cada 5 minutos.')
     st.metric('Padrón P1 + P4', f'{len(padron):,}'.replace(',','.'))
 
@@ -213,11 +221,20 @@ try:
         desde,hasta=primero,corte_default
     rows,detail,combos,xf=compute_sales(bultos,padron,desde,hasta)
     valid_ok=True
+    reporte_error=''
+    try:
+        reporte_clientes=load_reporte_clientes()
+        detail=enriquecer_padron_1890(detail,reporte_clientes)
+        reporte_ok=True
+    except Exception as err:
+        # La lectura del padrón comercial no debe romper los restantes indicadores.
+        reporte_ok=False
+        reporte_error=str(err)
 except Exception as e:
     st.error('No pude calcular los indicadores con la información actual de Drive: '+str(e))
     st.info('No se muestran ceros ficticios ni se solicita seleccionar columnas. Verificá la conexión a Internet y los permisos de los TXT.')
     rows=[{'id':k,'nombre':name,'objetivo':OBJETIVOS[k],'real':None,'alcance':None,'faltan':None,'cobertura':None,'estado':'SIN DATOS DE DRIVE'} for k,name in NOMBRES.items()]
-    detail=None; combos=None; valid_ok=False; xf=None; ultimo=None
+    detail=None; combos=None; valid_ok=False; xf=None; ultimo=None; reporte_ok=False; reporte_error=""
 
 tab_general, tab_promotor, tab_ranking = st.tabs(['📊 Indicadores generales','👥 CCC y TBD por promotor','🏆 Ranking'])
 
@@ -264,14 +281,74 @@ with tab_general:
                 st.dataframe(tbd_pendientes,use_container_width=True,hide_index=True)
                 st.download_button('Descargar combos UNG pendientes',tbd_pendientes.to_csv(index=False).encode('utf-8-sig'),file_name='tbd_ung_combos_pendientes.csv',mime='text/csv')
 
-        st.subheader('1890 · P1 y P4')
+        st.subheader('1890 · P1 y P4 | Gestión por promotor')
         a,b,c=st.columns(3)
         a.metric('Clientes del padrón',len(padron))
         b.metric('Compraron 1890',int(detail['estado_1890'].eq('Compró').sum()))
         c.metric('No compraron 1890',int(detail['estado_1890'].eq('No compró').sum()))
-        with st.expander('Ver clientes compradores / no compradores 1890'):
-            st.dataframe(detail,use_container_width=True,hide_index=True)
-            st.download_button('Descargar padrón con estado',detail.to_csv(index=False).encode('utf-8-sig'),file_name='1890_p1_p4_compras.csv',mime='text/csv')
+        st.caption('Compras: TXT de ventas del período seleccionado. Nombre de fantasía y promotor asignado: REPORTE DE CLIENTES de Google Drive. La asignación comercial del reporte puede diferir del vendedor que realizó una venta.')
+        if reporte_ok:
+            sin_cruce=int(detail['estado_cruce'].eq('No figura en reporte').sum())
+            sin_promotor=int(detail['promotor'].eq('Sin asignar').sum())
+            if sin_cruce or sin_promotor:
+                st.warning(f'Reporte de clientes: {len(detail)-sin_cruce} de {len(detail)} clientes vinculados. '
+                           f'{sin_cruce} sin coincidencia y {sin_promotor} sin promotor asignado. '
+                           'Estos clientes permanecen visibles para revisión.')
+            # Filtros independientes del resultado comercial, sin modificar el Real general.
+            promotores=['Todos']+sorted(detail['promotor'].dropna().unique().tolist(),
+                                       key=lambda v:(v=='Sin asignar',v.casefold()))
+            col_filtro1,col_filtro2=st.columns(2)
+            with col_filtro1:
+                promotor_1890=st.selectbox('Promotor asignado', promotores, key='p1p4_filtro_promotor')
+            with col_filtro2:
+                estado_1890=st.selectbox('Estado de compra 1890', ['Todos','No compró','Compró'],key='p1p4_filtro_compra')
+            listado=detail.copy()
+            if promotor_1890!='Todos':
+                listado=listado[listado['promotor'].eq(promotor_1890)]
+            if estado_1890!='Todos':
+                listado=listado[listado['estado_1890'].eq(estado_1890)]
+            ver=listado.rename(columns={
+                'cliente_codigo':'Código de cliente', 'nombre_fantasia':'Nombre de fantasía',
+                'razon_social':'Razón social', 'promotor':'Promotor', 'ruta_venta':'Ruta',
+                'estado_1890':'Estado 1890', 'bultos_neto_1890':'Bultos netos 1890',
+                'estado_cruce':'Coincidencia con reporte',
+            })
+            visible=[c for c in ['Código de cliente','Nombre de fantasía','Razón social',
+                       'Promotor','Ruta','Estado 1890','Bultos netos 1890','Coincidencia con reporte'] if c in ver.columns]
+            ver=ver[visible].sort_values(['Promotor','Estado 1890','Nombre de fantasía'],kind='stable')
+            f1,f2,f3=st.columns(3)
+            f1.metric('Clientes filtrados',len(ver))
+            f2.metric('Compraron',int(listado['estado_1890'].eq('Compró').sum()))
+            f3.metric('Pendientes de compra',int(listado['estado_1890'].eq('No compró').sum()))
+            st.dataframe(ver,use_container_width=True,hide_index=True,height=400)
+            nombre_seguro=re.sub(r'[^a-z0-9]+','_',promotor_1890.lower()).strip('_') if promotor_1890!='Todos' else 'todos'
+            cdesc1,cdesc2=st.columns(2)
+            with cdesc1:
+                st.download_button('📥 Descargar listado filtrado',ver.to_csv(index=False).encode('utf-8-sig'),
+                    file_name=f'1890_p1_p4_{nombre_seguro}.csv',mime='text/csv',key='1890_descargar_filtrado')
+            pendientes=listado[listado['estado_1890'].eq('No compró')].copy().rename(columns={
+                'cliente_codigo':'Código de cliente','nombre_fantasia':'Nombre de fantasía',
+                'razon_social':'Razón social','promotor':'Promotor','ruta_venta':'Ruta',
+                'estado_1890':'Estado 1890','estado_cruce':'Coincidencia con reporte',
+            })
+            cols_pend=[c for c in ['Código de cliente','Nombre de fantasía','Razón social','Promotor','Ruta',
+                                   'Estado 1890','Coincidencia con reporte'] if c in pendientes.columns]
+            with cdesc2:
+                st.download_button('📥 Descargar solo los que NO compraron',pendientes[cols_pend].to_csv(index=False).encode('utf-8-sig'),
+                    file_name=f'1890_p1_p4_pendientes_{nombre_seguro}.csv',mime='text/csv',key='1890_descargar_pendientes')
+            with st.expander('Resumen de compra 1890 por promotor'):
+                resumen_1890=(detail.groupby(['promotor','estado_1890']).size().unstack(fill_value=0)
+                              .reindex(columns=['Compró','No compró'],fill_value=0).reset_index())
+                resumen_1890['Total']=resumen_1890['Compró']+resumen_1890['No compró']
+                resumen_1890['Cobertura']=resumen_1890['Compró'].div(resumen_1890['Total'].replace(0,pd.NA))
+                st.dataframe(resumen_1890,use_container_width=True,hide_index=True)
+                st.download_button('Descargar resumen por promotor',resumen_1890.to_csv(index=False).encode('utf-8-sig'),
+                                   file_name='1890_resumen_por_promotor.csv',mime='text/csv',key='1890_descargar_resumen')
+        else:
+            st.error('No se pudo leer REPORTE DE CLIENTES desde Drive: '+reporte_error)
+            st.info('La cobertura de 1890 sigue calculada desde las ventas, pero se suspende el filtro por promotor hasta poder verificar la asignación de clientes.')
+            with st.expander('Ver listado sin asignación de promotores'):
+                st.dataframe(detail,use_container_width=True,hide_index=True)
         with st.expander('Auditoría de combos incluidos y pendientes'):
             st.caption('Un cliente que compró dos combos con el mismo producto cuenta UNA vez por indicador. El producto de un combo puede aportar a múltiples indicadores. La composición incompleta no se supone.')
             st.dataframe(combos,use_container_width=True,hide_index=True)

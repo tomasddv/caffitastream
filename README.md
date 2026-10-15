@@ -116,3 +116,7 @@ Las composiciones detalladas están en `combo_componentes.csv` y el mapeo operat
 **Validación sobre el archivo de ventas disponible del 01/10 al 15/10/2026:** TBD UNG antes 6.043; tras completar las ocho composiciones 6.276; 0 combos vendidos pendientes de desglose para este corte. Pueden incorporarse nuevos códigos de combos a Drive posteriormente; si carecen de composición, el dashboard volverá a marcar el resultado como parcial.
 
 Para actualizar automáticamente las ventas, el tablero sigue descargando `ventadiaria.txt` y `ventadiaria bultos.txt` de Google Drive al abrir, tras vencer la caché o al pulsar **Actualizar desde Drive**. El **catálogo de composiciones** es local: requiere cargar una composición confirmada cada vez que aparezca un combo nuevo, y no se obtiene automáticamente de CHESS.
+
+### Actualización — 1890 P1/P4 con nombre de fantasía y promotor
+
+En Indicadores generales se agregó un filtro por promotor y por estado de compra para los clientes del padrón P1/P4. La app consulta `REPORTE DE CLIENTES.xlsx` desde la misma carpeta Google Drive de las ventas; cruza por **Cliente**, incorpora **Nombre de fantasia**, **Descripción personal comercial** y **Ruta de venta**, y permite descargar la lista filtrada o solamente clientes sin compra 1890. La ausencia de datos comerciales en el reporte se marca **Sin asignar** y no modifica el Real de ventas.
