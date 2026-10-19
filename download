@@ -1,0 +1,10 @@
+# Python / entorno local
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.log
+.env
+.env.*
+.streamlit/secrets.toml

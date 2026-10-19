@@ -276,8 +276,15 @@ def mask_por_indicador(x):
     return flags,is_combo
 
 
-def compute_sales(bultos:pd.DataFrame,padron:pd.DataFrame,desde=None,hasta=None):
+def compute_sales(bultos:pd.DataFrame,padron:pd.DataFrame,desde=None,hasta=None, *, excluir_clientes:set[str]|None=None):
+    """Calcula TODOS los KPI usando un único filtro de clientes excluidos.
+
+    El DataFrame filtrado se reutiliza para detalle, promotores, ranking y TBD.
+    """
     x=prepare(bultos)
+    if excluir_clientes:
+        x=x.loc[~x['cliente'].isin(excluir_clientes)].copy()
+        padron=padron.loc[~padron['cliente_codigo'].isin(excluir_clientes)].copy()
     if desde is not None: x=x.loc[x['fecha'].dt.date>=desde].copy()
     if hasta is not None: x=x.loc[x['fecha'].dt.date<=hasta].copy()
     flags,is_combo=mask_por_indicador(x)

@@ -13,7 +13,8 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from padron import cargar_padron
-from reporte_clientes import REPORTE_CLIENTES_ID, leer_reporte_clientes_xlsx, enriquecer_padron_1890
+from reporte_clientes import (REPORTE_CLIENTES_ID, leer_reporte_clientes_xlsx, enriquecer_padron_1890,
+                              clientes_clie_people, filtrar_padron_people)
 from motor import (
     DIA_ID,BULTOS_ID,NOMBRES,OBJETIVOS,leer_tsv,prepare,compute_sales,
     detalle_tbd_ung,detalle_innovaciones,validate_reconciliation,promotor_breakdown,
@@ -198,11 +199,18 @@ with st.sidebar:
     if st.button('🔄 Actualizar desde Drive',use_container_width=True):
         drive_txt.clear(); load_both.clear(); load_reporte_clientes.clear(); st.rerun()
     st.caption('Se lee al abrir y con Actualizar desde Drive. La caché vence cada 5 minutos.')
-    st.metric('Padrón P1 + P4', f'{len(padron):,}'.replace(',','.'))
+    st.metric('Padrón P1 + P4 original', f'{len(padron):,}'.replace(',','.'))
 
 try:
-    with st.spinner('Descargando ventas desde Google Drive y verificando los datos...'):
+    with st.spinner('Descargando ventas y clasificación de clientes desde Google Drive...'):
         vol,bultos=load_both()
+        # La clasificación CLIE PEOPLE es obligatoria para todos los KPI.
+        # Si falla este reporte no se muestran indicadores sin filtrar.
+        reporte_clientes=load_reporte_clientes()
+        excluidos_people=clientes_clie_people(reporte_clientes)
+        padron_activo=filtrar_padron_people(padron,excluidos_people)
+        excluidos_p1p4=len(padron)-len(padron_activo)
+        reporte_ok=True
     prep=prepare(bultos)
     fechas=prep['fecha'].dropna()
     if fechas.empty: raise ValueError('No se identificaron fechas de venta.')
@@ -219,28 +227,23 @@ try:
         desde,hasta=periodo
     else:
         desde,hasta=primero,corte_default
-    rows,detail,combos,xf=compute_sales(bultos,padron,desde,hasta)
+    rows,detail,combos,xf=compute_sales(bultos,padron_activo,desde,hasta,excluir_clientes=excluidos_people)
+    detail=enriquecer_padron_1890(detail,reporte_clientes)
     valid_ok=True
     reporte_error=''
-    try:
-        reporte_clientes=load_reporte_clientes()
-        detail=enriquecer_padron_1890(detail,reporte_clientes)
-        reporte_ok=True
-    except Exception as err:
-        # La lectura del padrón comercial no debe romper los restantes indicadores.
-        reporte_ok=False
-        reporte_error=str(err)
 except Exception as e:
     st.error('No pude calcular los indicadores con la información actual de Drive: '+str(e))
-    st.info('No se muestran ceros ficticios ni se solicita seleccionar columnas. Verificá la conexión a Internet y los permisos de los TXT.')
+    st.info('No se muestran indicadores sin aplicar la exclusión CLIE PEOPLE. Revisá acceso a los dos TXT y a REPORTE DE CLIENTES en Drive.')
     rows=[{'id':k,'nombre':name,'objetivo':OBJETIVOS[k],'real':None,'alcance':None,'faltan':None,'cobertura':None,'estado':'SIN DATOS DE DRIVE'} for k,name in NOMBRES.items()]
     detail=None; combos=None; valid_ok=False; xf=None; ultimo=None; reporte_ok=False; reporte_error=""
+    excluidos_people=set(); excluidos_p1p4=0; padron_activo=padron
 
 tab_general, tab_promotor, tab_ranking = st.tabs(['📊 Indicadores generales','👥 CCC y TBD por promotor','🏆 Ranking'])
 
 with tab_general:
     components.html(STYLE+'<div class="group" style="--n:3">'+cards_html(rows[:3])+'</div><div class="group" style="--n:7">'+cards_html(rows[3:])+'</div>',height=640,scrolling=True)
     if valid_ok:
+        st.caption(f'Exclusión automática: {len(excluidos_people)} clientes CLIE PEOPLE fuera de TODOS los indicadores; {excluidos_p1p4} pertenecían al padrón P1/P4. Objetivos comerciales sin modificar.')
         summary=pd.DataFrame(rows)
         st.caption(f'Corte de ventas: **{ultimo:%d/%m/%Y}** · Selección: **{desde:%d/%m/%Y} al {hasta:%d/%m/%Y}** · {len(xf):,} registros evaluados'.replace(',','.'))
         st.subheader('Seguimiento y detalle')
@@ -283,10 +286,10 @@ with tab_general:
 
         st.subheader('1890 · P1 y P4 | Gestión por promotor')
         a,b,c=st.columns(3)
-        a.metric('Clientes del padrón',len(padron))
+        a.metric('Clientes P1/P4 elegibles',len(padron_activo))
         b.metric('Compraron 1890',int(detail['estado_1890'].eq('Compró').sum()))
         c.metric('No compraron 1890',int(detail['estado_1890'].eq('No compró').sum()))
-        st.caption('Compras: TXT de ventas del período seleccionado. Nombre de fantasía y promotor asignado: REPORTE DE CLIENTES de Google Drive. La asignación comercial del reporte puede diferir del vendedor que realizó una venta.')
+        st.caption(f'CLIE PEOPLE excluidos del padrón: {excluidos_p1p4}. Compras: TXT de ventas del período seleccionado. Fantasía, subcanal y promotor: REPORTE DE CLIENTES de Drive. La asignación comercial puede diferir del vendedor que realizó una venta.')
         if reporte_ok:
             sin_cruce=int(detail['estado_cruce'].eq('No figura en reporte').sum())
             sin_promotor=int(detail['promotor'].eq('Sin asignar').sum())
@@ -365,9 +368,9 @@ INDICADORES_PROMOTORES=['h2oh','redbull','pure_gold','mi','cero','core','1890','
 
 with tab_promotor:
     st.subheader('CCC y TBD por promotor')
-    st.caption('Los 10 KPI del tablero en una sola tabla · CCC = clientes únicos con compra · TBD UNG = pares cliente–SKU únicos. Datos del período elegido, desde Google Drive.')
+    st.caption('Los 10 KPI sin CLIE PEOPLE · CCC = clientes únicos con compra · TBD UNG = pares cliente–SKU únicos. Ventas y clasificación desde Google Drive.')
     if valid_ok:
-        matriz=promotor_breakdown(xf, INDICADORES_PROMOTORES, padron)
+        matriz=promotor_breakdown(xf, INDICADORES_PROMOTORES, padron_activo)
         altura=max(440,min(990,140+34*(len(matriz)+1)))
         components.html(promotor_table_html(matriz), height=altura, scrolling=True)
         with st.expander('Ver tabla accesible y descargar CSV'):
@@ -379,11 +382,11 @@ with tab_promotor:
 
 with tab_ranking:
     st.subheader('Ranking de promotores')
-    st.caption('Ordená a los promotores por cualquiera de los 10 indicadores. El ranking usa los mismos cálculos y período que la tabla por promotor.')
+    st.caption('Ranking sin clientes CLIE PEOPLE. Usa los mismos cálculos y período que la tabla por promotor.')
     if valid_ok:
         indicador_rank=st.selectbox('Indicador del ranking',INDICADORES_PROMOTORES,format_func=lambda k:PROMOTOR_LABELS.get(k,NOMBRES.get(k,k)),index=0,key='seleccion_ranking')
         col_indicador=PROMOTOR_LABELS.get(indicador_rank,NOMBRES.get(indicador_rank,indicador_rank))
-        seleccion=matriz[['Promotores',col_indicador]].copy() if 'matriz' in locals() else promotor_breakdown(xf,[indicador_rank],padron)
+        seleccion=matriz[['Promotores',col_indicador]].copy() if 'matriz' in locals() else promotor_breakdown(xf,[indicador_rank],padron_activo)
         seleccion=seleccion.loc[~seleccion['Promotores'].isin(['Totales','Sin promotor'])].copy()
         seleccion=seleccion.sort_values([col_indicador,'Promotores'],ascending=[False,True],kind='stable').reset_index(drop=True)
         seleccion.insert(0,'Posición',seleccion[col_indicador].rank(method='min',ascending=False).astype(int))

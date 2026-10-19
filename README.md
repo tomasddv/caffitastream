@@ -1,3 +1,13 @@
+## Exclusión automática CLIE PEOPLE (19/10/2026)
+
+- La aplicación descarga también `REPORTE DE CLIENTES.xlsx` desde la carpeta de Drive existente.
+- En **Descripcion subcanal** identifica exactamente `CLIE PEOPLE` (ignorando diferencias de mayúsculas y espacios). **No** utiliza la categoría impositiva.
+- Se eliminan esos códigos de cliente **antes** de calcular cualquier KPI: los 10 indicadores generales, los pares cliente-SKU del TBD UNG (ventas individuales y combos), la vista por promotor, el ranking y las exportaciones.
+- En Cobertura 1890 P1/P4 también se excluyen del padrón elegible si estuvieran presentes. Los objetivos comerciales originales se mantienen sin modificar.
+- La app indica cuántos clientes CLIE PEOPLE detectó y cuántos correspondían al padrón. Se actualiza con las fuentes de Drive (caché de 5 minutos y botón Actualizar).
+- **Seguridad de datos:** si REPORTE DE CLIENTES no puede descargarse o carece de la columna de subcanal, no se muestran números de KPI sin filtrar. Los clientes ausentes del reporte no se consideran CLIE PEOPLE por suposición.
+- La app no guarda el Excel del reporte dentro del repositorio. El padrón `clientes_p1_p4.csv` sí se incluye: si contiene datos personales, utilizá repositorios y apps con controles de acceso adecuados.
+
 # Tablero DDV — ventas automáticas desde Google Drive
 
 ## Apertura en Windows

@@ -20,6 +20,7 @@ _REQUIRED = (
     'Cliente', 'Nombre de fantasia', 'Razon social',
     'Fuerza de venta 1 Descripcion personal comercial',
     'Fuerza de venta 1 Ruta de venta',
+    'Descripcion subcanal',
 )
 
 
@@ -100,8 +101,24 @@ def leer_reporte_clientes_xlsx(raw: bytes) -> pd.DataFrame:
         'Nombre de fantasia':'nombre_fantasia',
         'Razon social':'razon_social_reporte',
         'Fuerza de venta 1 Ruta de venta':'ruta_venta',
-    })[['cliente_codigo','nombre_fantasia','razon_social_reporte','promotor','ruta_venta']]
+        'Descripcion subcanal':'subcanal',
+    })[['cliente_codigo','nombre_fantasia','razon_social_reporte','promotor','ruta_venta','subcanal']]
 
+
+def clientes_clie_people(reporte: pd.DataFrame) -> set[str]:
+    """Códigos clasificados exactamente como CLIE PEOPLE en el subcanal de CHESS.
+
+    No confundir con 'Categoria' ni 'Categoría' impositiva del XLSX.
+    """
+    if not {'cliente_codigo', 'subcanal'}.issubset(reporte.columns):
+        raise ValueError('Faltan código o subcanal en REPORTE DE CLIENTES; no se puede aplicar la exclusión CLIE PEOPLE.')
+    categoria = reporte['subcanal'].fillna('').astype(str).str.upper().str.replace(r'\s+', ' ', regex=True).str.strip()
+    return set(reporte.loc[categoria.eq('CLIE PEOPLE'), 'cliente_codigo'])
+
+
+def filtrar_padron_people(padron: pd.DataFrame, excluidos: set[str]) -> pd.DataFrame:
+    """Elimina CLIE PEOPLE también del universo de cobertura de 1890 P1+P4."""
+    return padron.loc[~padron['cliente_codigo'].isin(excluidos)].copy()
 
 def enriquecer_padron_1890(detalle: pd.DataFrame, reporte: pd.DataFrame) -> pd.DataFrame:
     """Cruza por código normalizado, conservando todos los P1+P4 sin inventar datos."""
