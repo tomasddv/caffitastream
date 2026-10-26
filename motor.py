@@ -58,7 +58,21 @@ COMBOS={
  # por lo tanto aporta a CCC Michelob, CCC Latones y CCC Cervezas.
  # No deducimos los otros dos componentes ni sus cantidades sin captura ERP.
  '900472':('cervezas','mi','latones'),
+ # Composiciones familiares explícitas en los nombres de los nuevos combos de CHESS.
+ # Se validó la contribución a CCC; los artículos individuales deben confirmarse
+ # antes de incorporarlos como SKU de TBD o desglose de Innovaciones.
+ '900466':('cervezas','latones'),      # Combo Latones Brahma y Quilmes Patagonia BDV
+ '900471':('cervezas','pure_gold','cero'), # Porrones 0.0 + Pure Gold
+ '900473':('cervezas','core'),         # Brahma y Quilmes 269 cc SUR
+ # Conciliación del reporte oficial 19/10/2026: familias reconocibles
+ # por nombre de combo; NO se inventan componentes SKU desconocidos.
+ '900457':('ung','redbull'),           # Combo Red Bull 4 SKU: desglose pendiente
+ '900465':('ung','h2oh'),             # Saborizadas Patagonia: CCC H2OH
+ '900467':('ung',),                   # Gatorade K+T octubre: desglose pendiente
+ '900469':('ung',),                   # Pet 500 octubre: desglose pendiente
+ '900470':('cervezas','core'),        # Brahma FT: CCC Innovaciones Core
 }
+
 # Desglose por *código exacto* según notas ERP del catálogo de combos de DDV.
 # Confirmados en capturas de CHESS, 15/10/2026.
 # El 900098 aporta sólo el SKU 7476 de Paso de los Toros Tónica a UNG;
@@ -260,6 +274,28 @@ def detalle_innovaciones(x:pd.DataFrame, por_promotor:bool=False):
     return pares, resumen, sin_composicion
 
 
+
+def compradores_innovaciones_core(x:pd.DataFrame, por_promotor:bool=False) -> pd.DataFrame:
+    """Compradores Core con desglose seguro y combos FT de familia confirmada.
+
+    Un combo como 900470 contiene Brahma FT, reconocido por su descripción
+    y cotejado con el informe comercial, aunque la composición SKU del ERP
+    todavía está pendiente. Cuenta una vez en CCC pero NO se inventan SKU.
+    """
+    pares, _, _ = detalle_innovaciones(x, por_promotor=por_promotor)
+    cols = (['promotor'] if por_promotor else []) + ['cliente']
+    directos = pares[cols].drop_duplicates()
+    codigos = [sku for sku, familias in COMBOS.items() if 'core' in familias]
+    if not codigos:
+        return directos
+    combo = x.loc[x['sku'].isin(codigos), cols+['sku','bultos']].copy()
+    if combo.empty:
+        return directos
+    suma = combo.groupby(cols+['sku'], as_index=False)['bultos'].sum()
+    compradores = suma.loc[suma['bultos'].gt(0), cols].drop_duplicates()
+    return pd.concat([directos, compradores], ignore_index=True).drop_duplicates().reset_index(drop=True)
+
+
 def mask_por_indicador(x):
     sku=x['sku'];marca=x['marca'];desc=x['descripcion'];cal=x['calibre'];division=x['division'];unidad=x['unidad'];is_combo=sku.isin(COMBOS.keys()) | sku.str.match(r'^900\d{3}$')
     ordinary=~is_combo
@@ -300,8 +336,8 @@ def compute_sales(bultos:pd.DataFrame,padron:pd.DataFrame,desde=None,hasta=None,
         mask=flags[k] & x['cliente'].ne('')
         if k=='1890':mask=mask & x['cliente'].isin(padr)
         if k=='core':
-            pares_core, _, pendientes_core=detalle_innovaciones(x)
-            compradores=set(pares_core['cliente'])
+            _, _, pendientes_core=detalle_innovaciones(x)
+            compradores=set(compradores_innovaciones_core(x)['cliente'])
             real=len(compradores)
         elif k=='ung':
             pares_ung, combos_pendientes_ung=detalle_tbd_ung(x)
@@ -316,7 +352,7 @@ def compute_sales(bultos:pd.DataFrame,padron:pd.DataFrame,desde=None,hasta=None,
         goal=OBJETIVOS[k]
         ratio=real/goal if real is not None else None
         coverage=real/len(padr) if k=='1890' and real is not None else None
-        if k=='core':estado=('CALCULADO · Innovaciones 269 cc + Brahma FT (combos documentados)' if pendientes_core.empty else 'PARCIAL · revisar combos de innovaciones')
+        if k=='core':estado=('PARCIAL · combos 900470 / 900473: CCC incluido; faltan SKU componentes' if (x['sku'].isin(('900470','900473')) & x['bultos'].gt(0)).any() else ('CALCULADO · Innovaciones 269 cc + Brahma FT' if pendientes_core.empty else 'PARCIAL · revisar combos de innovaciones'))
         elif k=='ung':estado=('PARCIAL · faltan SKU de '+str(len(combos_pendientes_ung))+' combos' if len(combos_pendientes_ung) else 'CALCULADO · cliente + SKU (incluye combos documentados)')
         elif k=='1890':estado='CALCULADO · combos 1890 sin composición confirmada'
         else:estado='CALCULADO · mapeo de combos conocidos'
@@ -350,8 +386,8 @@ def promotor_breakdown(x:pd.DataFrame, indicadores:list[str], padron:pd.DataFram
             pares,_=detalle_tbd_ung(x,por_promotor=True)
             serie=pares.groupby('promotor').size()
         elif ind=='core':
-            pares,_,_=detalle_innovaciones(x,por_promotor=True)
-            serie=pares.groupby('promotor')['cliente'].nunique()
+            clientes_core=compradores_innovaciones_core(x,por_promotor=True)
+            serie=clientes_core.groupby('promotor')['cliente'].nunique()
         else:
             mask=flags[ind] & x['cliente'].ne('')
             if ind=='1890':

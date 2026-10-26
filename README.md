@@ -1,3 +1,32 @@
+# Control del informe 19/10/2026 y nuevos combos (26/10/2026)
+
+- Nueva cuarta solapa **Control Excel 19/10**: confronta los 10 KPI del libro histórico del 19/10 con los TXT actuales filtrados del 1 al 19/10, usando las reglas vigentes y excluyendo CLIE PEOPLE. Descarga CSV del control.
+- Se reconoce **900465 COMBO SABORIZADAS - PATAGONIA** para **CCC H2OH!**. Tiene componentes UNG pendientes de identificación (no se inventan SKU).
+- Se reconoce **900470 COMBO BRAHMA FT** para **CCC Innovaciones Core** y Cervezas. Se computa 1 CCC por cliente con compra neta, sin adjudicar SKU de limón/pomelo no confirmados. El desglose de Innovaciones sigue mostrando solo SKUs confirmados.
+- Se señalan como **pendientes para TBD UNG** los combos 900457, 900465, 900467 y 900469 al 19/10. El TBD no aumenta artificialmente por estos combos sin desglose de CHESS.
+- Con el padrón actual (940 clientes), al 19/10 coinciden 5 KPI con el Excel comercial; quedan diferencias de Cervezas +1, 1890 -14 por padrón, Latones +1, Core -1 y TBD UNG -38 por conciliación pendiente de productos y distinta granularidad. **No** se ajustan las cifras a mano.
+- Se adjunta `CONCILIACION_19_10_2026.md` con hipótesis, causas comprobadas y limitaciones.
+- El archivo original `19.10 avance de coberturas.xlsx` y el Excel completo de clientes **no** están incluidos en el repositorio por tamaño y confidencialidad. Solo se guarda una referencia de 10 totales en `control_referencia_19_10_2026.csv`.
+
+---
+
+# Actualización P1 + P4 — 26/10/2026
+
+El padrón vigente contiene **940 clientes únicos** y reemplaza el archivo de 942 clientes que traía la versión anterior. Se incorporaron los dos Excel recibidos el 26/10/2026:
+
+- `export (7).xlsx`: 52 clientes.
+- `export (8).xlsx`: 888 clientes.
+- Duplicados entre ambos: 0.
+- Nuevos códigos: 0.
+- Bajas respecto del padrón anterior: **3913** (FERNANDEZ RICARDO) y **5430** (CUMINAO TAMARA JUDITH).
+- Cambio de razón social para el código **5299**: de DIAZ ROMINA VANESA a IGLESIAS NORBERTO MARTIN. Revisar comercialmente si corresponde actualizar también la ficha de cliente en CHESS.
+
+`clientes_p1_p4.csv` fue reemplazado; `padron.py` sigue deduplicando y cruzando por código. Tanto el CCC 1890 general como su tabla filtrable por promotor y el ranking 1890 usan automáticamente el padrón actualizado cuando se despliega este proyecto. No cambia el objetivo **941** de 1890, ni las reglas de CLIE PEOPLE, combos o TBD. El porcentaje *Cobertura* divide compradores únicos entre el universo elegible actual, no entre el objetivo.
+
+La actualización es un **padrón fijo** creado a partir de estos Excel; las ventas y `REPORTE DE CLIENTES` continúan consultándose de Drive automáticamente. Para incorporar nuevos cambios de universo P1/P4 deberá actualizarse `clientes_p1_p4.csv`.
+
+---
+
 ## Combo Michelob 710 cc: nueva regla CCC (26/10/2026)
 
 - **900472 — COMBO MICHELOB 3CAL - PATAGONIA - KT**: cada compra neta positiva de un cliente aporta a **CCC Michelob**, **CCC Latones** (710 cc) y **CCC Cervezas**, salvo que ese cliente ya esté contabilizado por otra compra dentro de cada indicador. La matriz por promotor y el ranking reutilizan exactamente las mismas reglas.
@@ -31,7 +60,7 @@ Los archivos deben continuar accesibles por el enlace de solo lectura de Google 
 
 - Drive: `ventadiaria.txt` y `ventadiaria bultos.txt` (IDs incluidos en `motor.py`). Se comprueba que coincidan los registros por fecha, cliente, código e importe para que no se mezclen cortes distintos.
 - Se utilizan las **cantidades netas positivas** para validar la compra, nunca como magnitud de TBD UNG. **TBD UNG = número de pares únicos cliente–SKU comprado** (bultos no ponderan); las compras de combos aportan sus componentes identificados por código.
-- Los clientes P1+P4 son los 942 códigos únicos de los dos padrones que enviaste. Objetivo 1890 = 941, cobertura del padrón = compradores únicos sobre 942.
+- Los clientes P1+P4 vigentes son los 940 códigos únicos de los dos Excel del 26/10/2026. Objetivo 1890 = 941, cobertura del padrón = compradores únicos sobre 940 clientes elegibles (antes de posibles exclusiones CLIE PEOPLE).
 - Un cliente que compra el mismo producto directo y/o a través de varios combos **cuenta una sola vez** para el KPI de cobertura.
 - Se incluyen combos identificados en el catálogo histórico del proyecto DDV: por ejemplo Stella Pure Gold (900381, 900393, 900429, 900430, 900463), Michelob (900407), cervezas 0.0 (900399, 900461), Red Bull (900423, 900424, 900439, 900441, 900455, 900456) y latones (900299, 900311, 900428).
 - Los códigos de combo cuyo contenido no está suficientemente definido **no se asignan por suposición** a todos los indicadores: aparecen en **Auditoría de combos incluidos y pendientes**.
@@ -86,7 +115,7 @@ Se eliminó el comando `for /f` de Windows que interpretaba incorrectamente las 
 - **Indicadores generales:** conserva los diez KPI, objetivos, imágenes, conexión automática a Drive, desglose de innovaciones, TBD UNG por par cliente-SKU, detalle P1/P4 y auditoría.
 - **CCC y TBD por promotor:** muestra los **diez KPI** sin selección manual de columnas. Agrupa por `Descripción Vendedor` de la venta, presenta alias comerciales de promotor, barras proporcionales, fila `Totales`, fila `Sin promotor` cuando hay registros sin asignación y descarga CSV.
 - **Ranking:** permite elegir **uno de los diez indicadores**, muestra un gráfico horizontal, clasificación descendente, empates con el mismo puesto y descarga CSV; excluye la fila `Sin promotor` y la fila `Totales` de la competencia.
-- **CCC:** comprador único para el período por promotor y KPI. **CCC 1890:** se filtra por los 942 clientes del padrón P1 + P4 antes de contar, igual que el tablero general.
+- **CCC:** comprador único para el período por promotor y KPI. **CCC 1890:** se filtra por los 940 clientes del padrón actualizado P1 + P4 antes de contar, igual que el tablero general.
 - **TBD UNG:** par único `promotor, cliente, SKU`; los combos conocidos se expanden por SKU, sin sumar bultos. Las composiciones sin SKU confirmado permanecen pendientes; por lo tanto, el TBD puede ser parcial.
 - **Totales:** la fila suma los resultados por promotor; si un cliente compró con más de un vendedor en el período, la suma de CCC por promotores puede ser mayor que la cobertura única general. No hay objetivos individuales por promotor; el ranking es por valor absoluto, no por cumplimiento porcentual.
 - **Combos fotografiados en BEES:** aparecen varias ofertas presentes en el catálogo, incluidos Pepsi SUR, Mirinda SUR, Latas PAT SUR, GTD 750CC y Saborizadas. La fotografía no permite leer inequívocamente todos los códigos de artículo; por seguridad **no** se agregaron composiciones nuevas sin verificación de SKU en ERP/BEES.
@@ -138,3 +167,15 @@ Para actualizar automáticamente las ventas, el tablero sigue descargando `venta
 ### Actualización — 1890 P1/P4 con nombre de fantasía y promotor
 
 En Indicadores generales se agregó un filtro por promotor y por estado de compra para los clientes del padrón P1/P4. La app consulta `REPORTE DE CLIENTES.xlsx` desde la misma carpeta Google Drive de las ventas; cruza por **Cliente**, incorpora **Nombre de fantasia**, **Descripción personal comercial** y **Ruta de venta**, y permite descargar la lista filtrada o solamente clientes sin compra 1890. La ausencia de datos comerciales en el reporte se marca **Sin asignar** y no modifica el Real de ventas.
+
+
+## Actualización del 26/10/2026 y conciliación
+
+- La fuente de cliente/razón social/subcanal/promotor ahora es **reporte de clientes.xlsx**, archivo nuevo de Google Drive ID `1VrxE5Tu1T_ruYkKf4eW3uiGoKlJcpCA6`, creado/actualizado el 26/10/2026. El reporte anterior, ID `1wMDck39W-Of-4HESCy6WXDWtnW02Swdz`, estaba actualizado por última vez el 22/09/2026 y no incluye las altas nuevas.
+- El reporte nuevo contiene 2.152 códigos de cliente únicos, de los cuales 142 están clasificados como subcanal **CLIE PEOPLE**. El padrón P1/P4 de los dos export del 26/10 contiene **940** clientes y todos encuentran coincidencia en el reporte actualizado.
+- La cuarta pestaña permite elegir las referencias comerciales del **19/10** (Excel) y **26/10** (capturas) y calcular de nuevo las ventas del día correspondiente. El archivo `control_referencia_26_10_2026.csv` es una instantánea explícita de las diez metas y resultados leídos de las capturas, no una fuente que se actualice sola.
+- El informe comercial muestra 957 clientes P1/P4, **17 más que los 940 del padrón vigente**; sus resultados no tienen por qué coincidir. Con los 957 clientes que figuraban en el informe del 19/10, el cálculo del 26/10 dio 684, mientras la captura oficial reporta 683.
+- **No se falsean resultados** de Pure Gold, Cerveza, Sin Alcohol, Latones, Core o TBD para coincidir con el informe. Persisten diferencias por auditar; en TBD UNG faltan las composiciones validadas de los combos 900457, 900465, 900467 y 900469. El combo 900473 de Brahma/Quilmes 269 se señala como pendiente de criterio de Core.
+- El resto de las funcionalidades, filtros por promotor, ranking y descarga 1890 se conservan.
+
+**Complemento comercial 26/10:** los combos 900466 (latones), 900471 (0.0% + Pure Gold) y 900473 (269 cc Core) se reconocen en los CCC por su composición familiar explícita. 900473 aporta 6 nuevos clientes a Core y el dashboard queda en 219, ante 217 de la referencia. No se estiman SKU individuales desconocidos.

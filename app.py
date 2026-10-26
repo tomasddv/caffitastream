@@ -17,7 +17,7 @@ from reporte_clientes import (REPORTE_CLIENTES_ID, leer_reporte_clientes_xlsx, e
                               clientes_clie_people, filtrar_padron_people)
 from motor import (
     DIA_ID,BULTOS_ID,NOMBRES,OBJETIVOS,leer_tsv,prepare,compute_sales,
-    detalle_tbd_ung,detalle_innovaciones,validate_reconciliation,promotor_breakdown,
+    detalle_tbd_ung,detalle_innovaciones,compradores_innovaciones_core,validate_reconciliation,promotor_breakdown,
     PROMOTOR_LABELS
 )
 
@@ -195,7 +195,7 @@ padron=cargar_padron()
 
 with st.sidebar:
     st.header('Actualización')
-    st.caption('Fuentes: ventadiaria.txt, ventadiaria bultos.txt y REPORTE DE CLIENTES.xlsx · Google Drive')
+    st.caption('Fuentes: ventadiaria.txt, ventadiaria bultos.txt y reporte de clientes.xlsx actualizado el 26/10/2026 · Google Drive')
     if st.button('🔄 Actualizar desde Drive',use_container_width=True):
         drive_txt.clear(); load_both.clear(); load_reporte_clientes.clear(); st.rerun()
     st.caption('Se lee al abrir y con Actualizar desde Drive. La caché vence cada 5 minutos.')
@@ -238,7 +238,7 @@ except Exception as e:
     detail=None; combos=None; valid_ok=False; xf=None; ultimo=None; reporte_ok=False; reporte_error=""
     excluidos_people=set(); excluidos_p1p4=0; padron_activo=padron
 
-tab_general, tab_promotor, tab_ranking = st.tabs(['📊 Indicadores generales','👥 CCC y TBD por promotor','🏆 Ranking'])
+tab_general, tab_promotor, tab_ranking, tab_control = st.tabs(['📊 Indicadores generales','👥 CCC y TBD por promotor','🏆 Ranking','🔎 Control oficial 19/10 y 26/10'])
 
 with tab_general:
     components.html(STYLE+'<div class="group" style="--n:3">'+cards_html(rows[:3])+'</div><div class="group" style="--n:7">'+cards_html(rows[3:])+'</div>',height=640,scrolling=True)
@@ -257,10 +257,12 @@ with tab_general:
         st.caption('Real = clientes únicos con compra neta positiva de cualquier innovación. Un mismo cliente cuenta una sola vez, aunque compre varios SKU y bultos.')
         innov_pares, innov_resumen, innov_pendientes=detalle_innovaciones(xf)
         c1,c2,c3=st.columns(3)
-        c1.metric('Clientes compradores de innovaciones',len(innov_pares['cliente'].unique()))
+        compradores_core_actual=compradores_innovaciones_core(xf)
+        c1.metric('Clientes compradores de innovaciones',len(compradores_core_actual))
         c2.metric('Objetivo comercial',OBJETIVOS['core'])
-        c3.metric('Alcance',f'{len(innov_pares["cliente"].unique()) / OBJETIVOS["core"]:.1%}')
+        c3.metric('Alcance',f'{len(compradores_core_actual) / OBJETIVOS["core"]:.1%}')
         st.dataframe(innov_resumen.rename(columns={'familia':'Producto','clientes':'Clientes','skus':'SKU distintos vendidos'}),use_container_width=True,hide_index=True)
+        st.caption('El total CCC también incluye compradores del combo Brahma FT 900470. Sus componentes no figuran en el detalle cliente–SKU hasta validar la composición CHESS.')
         with st.expander('Ver y descargar detalle de innovaciones por cliente y SKU'):
             st.dataframe(innov_pares,use_container_width=True,hide_index=True)
             st.download_button('Descargar clientes / SKU Innovaciones',innov_pares.to_csv(index=False).encode('utf-8-sig'),file_name='innovaciones_core_clientes_sku.csv',mime='text/csv')
@@ -405,3 +407,52 @@ with tab_ranking:
         st.caption('Los puestos se asignan según resultado descendente: los empates comparten posición. No se aplican objetivos por promotor porque solo tenemos objetivos generales de distribuidora.')
     else:
         st.info('Para armar el ranking es necesario conectar las ventas de Drive.')
+
+
+with tab_control:
+    st.subheader('Control de cobertura contra los informes oficiales')
+    st.caption('Se comparan datos homogéneos por fecha: ventas acumuladas de octubre hasta el día seleccionado. Los informes de referencia son instantáneas y no se modifican para forzar una coincidencia.')
+    opciones={
+        '26/10/2026 · Capturas comerciales':'control_referencia_26_10_2026.csv',
+        '19/10/2026 · Excel de avance':'control_referencia_19_10_2026.csv',
+    }
+    selector=st.selectbox('Informe de referencia',list(opciones),index=0,key='fecha_control_oficial')
+    fecha_corte=datetime.strptime(selector[:10],'%d/%m/%Y').date()
+    if valid_ok:
+        import csv
+        with (BASE/opciones[selector]).open(encoding='utf-8-sig',newline='') as archivo:
+            referencias=list(csv.DictReader(archivo))
+        valores,_,combos_corte,_=compute_sales(
+            bultos,padron_activo,
+            desde=datetime(2026,10,1).date(),hasta=fecha_corte,
+            excluir_clientes=excluidos_people)
+        mapa={a['id']:a['real'] for a in valores}
+        filas=[]
+        for ref in referencias:
+            codigo=ref['id'];n=int(ref['real_informe']);d=mapa[codigo]
+            filas.append({'Indicador':ref['indicador'],'Objetivo':int(ref['objetivo']),
+                          'Informe comercial':n,'Dashboard al corte':d,'Diferencia':d-n,
+                          'Estado':('Coincide' if d==n else ('Padrón distinto (957 vs 940)' if codigo=='1890' else 'Pendiente de conciliar'))})
+        df_auditoria=pd.DataFrame(filas)
+        aciertos=int(df_auditoria['Diferencia'].eq(0).sum())
+        a,b,c=st.columns(3)
+        a.metric('Indicadores coincidentes',f'{aciertos}/10')
+        b.metric('Indicadores con diferencias',10-aciertos)
+        c.metric('Clientes del padrón P1/P4 vigente',len(padron_activo))
+        st.dataframe(df_auditoria,hide_index=True,use_container_width=True)
+        sufijo=fecha_corte.strftime('%Y_%m_%d')
+        st.download_button('Descargar conciliación por KPI (CSV)',
+            df_auditoria.to_csv(index=False).encode('utf-8-sig'),
+            file_name=f'ddv_control_oficial_{sufijo}.csv',mime='text/csv',key='csv_conciliacion_oficial')
+        if fecha_corte.day==26:
+            st.warning('1890: la captura oficial utiliza 957 clientes P1/P4; los dos Excel de padrón vigentes suman 940. La diferencia no se puede eliminar sin cambiar el universo. Al recalcular las ventas con el padrón histórico de 957, se obtienen 684 compradores, frente a los 683 oficiales (posible diferencia de corte).')
+            st.info('TBD UNG: hay combos vendidos sin desglose validado (900457, 900465, 900467 y 900469). El combo 900473 — Brahma & Quilmes 269 cc aporta a CCC Innovaciones Core por la familia explícita en su descripción; los componentes SKU requieren confirmación. No se suman SKU ficticios.')
+            st.caption('Datos de referencia digitados de las dos capturas proporcionadas por el usuario el 26/10. No son una exportación automática del informe oficial.')
+        else:
+            st.info('El Excel del 19/10 usa 957 clientes P1/P4; el padrón vigente tiene 940. Las diferencias de 1890 son principalmente cambios en el universo.')
+        with st.expander('Criterios y límites de esta conciliación'):
+            st.write('Todos los KPI del dashboard excluyen los códigos clasificados CLIE PEOPLE en el archivo vigente de clientes de Drive. El universo de 1890 procede de los dos archivos P1 y P4 que proporcionaste el 26/10.')
+            st.write('Las ventas se extraen de los TXT actuales, aplicando el mismo corte de fecha que el informe, pero una rectificación posterior de ventas o una diferencia horaria entre extracciones puede producir desvíos.')
+            st.write('CCC cuenta clientes únicos por indicador; TBD UNG cuenta combinaciones cliente + SKU. Las composiciones de combos pendientes no se inventan ni se ajustan para coincidir artificialmente con el Excel.')
+    else:
+        st.warning('Conectá los archivos de ventas y el reporte de clientes de Drive para comparar los informes.')

@@ -13,8 +13,8 @@ import pandas as pd
 from padron import codigo_cliente
 from motor import normalizar_promotor
 
-# Archivo: REPORTE DE CLIENTES.xlsx; misma carpeta de ventas de DDV
-REPORTE_CLIENTES_ID = '1wMDck39W-Of-4HESCy6WXDWtnW02Swdz'
+# Fuente vigente: reporte de clientes.xlsx, carga del 26/10/2026; Drive ID nuevo.
+REPORTE_CLIENTES_ID = '1VrxE5Tu1T_ruYkKf4eW3uiGoKlJcpCA6'
 _NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 _REQUIRED = (
     'Cliente', 'Nombre de fantasia', 'Razon social',
