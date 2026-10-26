@@ -12,16 +12,46 @@ import pandas as pd
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+# Asegurar que se importe el motor del MISMO repositorio que app.py.
+# En Streamlit Cloud y durante las actualizaciones, una copia antigua del
+# motor puede generar ImportError si se mezclaron archivos de distintas versiones.
+import sys
+BASE = Path(__file__).resolve().parent
+if str(BASE) in sys.path:
+    sys.path.remove(str(BASE))
+sys.path.insert(0, str(BASE))
 from padron import cargar_padron
-from reporte_clientes import (REPORTE_CLIENTES_ID, leer_reporte_clientes_xlsx, enriquecer_padron_1890,
-                              clientes_clie_people, filtrar_padron_people)
-from motor import (
-    DIA_ID,BULTOS_ID,NOMBRES,OBJETIVOS,leer_tsv,prepare,compute_sales,
-    detalle_tbd_ung,detalle_innovaciones,compradores_innovaciones_core,validate_reconciliation,promotor_breakdown,
-    PROMOTOR_LABELS
-)
 
-BASE=Path(__file__).resolve().parent
+_ENGINE_EXPORTS = (
+    'DIA_ID', 'BULTOS_ID', 'NOMBRES', 'OBJETIVOS', 'leer_tsv', 'prepare',
+    'compute_sales', 'detalle_tbd_ung', 'detalle_innovaciones',
+    'compradores_innovaciones_core', 'validate_reconciliation',
+    'promotor_breakdown', 'PROMOTOR_LABELS',
+)
+try:
+    import motor as _ddv_motor
+    _actual_motor = Path(_ddv_motor.__file__).resolve()
+    _expected_motor = (BASE / 'motor.py').resolve()
+    if _actual_motor != _expected_motor:
+        raise RuntimeError('Se encontró otro módulo motor distinto al del repositorio.')
+    _missing = [name for name in _ENGINE_EXPORTS if not hasattr(_ddv_motor, name)]
+    if _missing:
+        raise RuntimeError('Faltan elementos del motor: ' + ', '.join(_missing))
+except Exception:
+    st.set_page_config(page_title='DDV | Revisión del despliegue', page_icon='⚠️')
+    st.error('No se pudo cargar el motor de indicadores. Los archivos app.py y motor.py deben ser de la misma versión.')
+    st.info('Subí todos los archivos del ZIP descomprimido a la raíz de GitHub en un único commit, y reiniciá la aplicación desde Manage app → Reboot app.')
+    st.stop()
+
+(DIA_ID, BULTOS_ID, NOMBRES, OBJETIVOS, leer_tsv, prepare, compute_sales,
+ detalle_tbd_ung, detalle_innovaciones, compradores_innovaciones_core,
+ validate_reconciliation, promotor_breakdown, PROMOTOR_LABELS) = (
+    getattr(_ddv_motor, name) for name in _ENGINE_EXPORTS
+)
+from reporte_clientes import (
+    REPORTE_CLIENTES_ID, leer_reporte_clientes_xlsx, enriquecer_padron_1890,
+    clientes_clie_people, filtrar_padron_people,
+)
 st.set_page_config(page_title='DDV | Indicadores automáticos',page_icon='📊',layout='wide')
 st.markdown("""<style>
 /* Paleta clara con todos los caracteres en negro, incluso en widgets y avisos. */
