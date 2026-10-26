@@ -2,20 +2,21 @@ import io
 import unittest
 import zipfile
 import pandas as pd
-from reporte_clientes import leer_reporte_clientes_xlsx, enriquecer_padron_1890
+from reporte_clientes import (leer_reporte_clientes_xlsx, enriquecer_padron_1890, clientes_clie_people, filtrar_padron_people)
 
 _NS='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 
-def sample_xlsx():
+def sample_xlsx(incluir_people=False):
     headers=['Cliente','Nombre de fantasia','Razon social',
-             'Fuerza de venta 1 Descripcion personal comercial','Fuerza de venta 1 Ruta de venta']
+             'Fuerza de venta 1 Descripcion personal comercial','Fuerza de venta 1 Ruta de venta', 'Descripcion subcanal']
     names=['Cliente', 'Nombre de fantasia', 'Razon social',
-           'Fuerza de venta 1 Descripcion personal comercial','Fuerza de venta 1 Ruta de venta',
-           'GALINA','PRUEBA','NICASTRO LUCAS']
+           'Fuerza de venta 1 Descripcion personal comercial','Fuerza de venta 1 Ruta de venta', 'Descripcion subcanal',
+           'GALINA','PRUEBA','NICASTRO LUCAS','TRADICIONAL','CLIE PEOPLE']
     shared=''.join('<si><t>'+n+'</t></si>' for n in names)
     cells=''.join(f'<c r="{chr(65+i)}1" t="s"><v>{i}</v></c>' for i in range(len(headers)))
-    row2='<c r="A2"><v>5</v></c><c r="B2" t="s"><v>5</v></c><c r="C2" t="s"><v>6</v></c><c r="D2" t="s"><v>7</v></c><c r="E2"><v>713</v></c>'
-    xml=f'<worksheet xmlns="{_NS}"><sheetData><row r="1">{cells}</row><row r="2">{row2}</row></sheetData></worksheet>'
+    row2='<c r="A2"><v>5</v></c><c r="B2" t="s"><v>6</v></c><c r="C2" t="s"><v>7</v></c><c r="D2" t="s"><v>8</v></c><c r="E2"><v>713</v></c><c r="F2" t="s"><v>9</v></c>'
+    row3='<row r="3"><c r="A3"><v>840</v></c><c r="F3" t="s"><v>10</v></c></row>' if incluir_people else ''
+    xml=f'<worksheet xmlns="{_NS}"><sheetData><row r="1">{cells}</row><row r="2">{row2}</row>{row3}</sheetData></worksheet>'
     with io.BytesIO() as b:
         with zipfile.ZipFile(b,'w',zipfile.ZIP_DEFLATED) as z:
             z.writestr('xl/sharedStrings.xml',f'<sst xmlns="{_NS}">{shared}</sst>')
@@ -42,6 +43,12 @@ class TestReporteClientes(unittest.TestCase):
         self.assertEqual(out['estado_1890'].tolist(),['Compró','No compró'])
         self.assertEqual(out['promotor'].tolist(),['Lucas','Sin asignar'])
         self.assertEqual(out['estado_cruce'].tolist(),['Coincide con reporte','No figura en reporte'])
+
+    def test_identificacion_exclusion_por_subcanal(self):
+        reporte=leer_reporte_clientes_xlsx(sample_xlsx(incluir_people=True))
+        self.assertEqual(clientes_clie_people(reporte), {'840'})
+        padron=pd.DataFrame({'cliente_codigo':['5','840']})
+        self.assertEqual(filtrar_padron_people(padron, clientes_clie_people(reporte))['cliente_codigo'].tolist(),['5'])
 
     def test_codigos_p1p4_repetidos_rechazados(self):
         padron=pd.DataFrame({'cliente_codigo':['5','5'],'estado_1890':['Compró','Compró']})

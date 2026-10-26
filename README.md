@@ -1,3 +1,11 @@
+## Combo Michelob 710 cc: nueva regla CCC (26/10/2026)
+
+- **900472 — COMBO MICHELOB 3CAL - PATAGONIA - KT**: cada compra neta positiva de un cliente aporta a **CCC Michelob**, **CCC Latones** (710 cc) y **CCC Cervezas**, salvo que ese cliente ya esté contabilizado por otra compra dentro de cada indicador. La matriz por promotor y el ranking reutilizan exactamente las mismas reglas.
+- **49827 — MICHELOB ULTRA CAN 4X4 710CC**: la venta individual también aporta a los mismos tres CCC. La vinculación del SKU 49827 al combo surge de la indicación comercial del usuario y del nombre y calibre observados en la fuente de ventas.
+- En `combo_componentes.csv` se registra sólo el componente 49827 **como desglose parcial**. Todavía hace falta verificar en la pestaña *Composición* de CHESS qué otros SKU y cantidades integran los tres calibres del combo 900472. No se inventaron componentes ni hectolitros.
+- Se conservan la exclusión `CLIE PEOPLE`, el padrón P1/P4, la actualización automática de Drive y las demás reglas. No se alteraron los objetivos.
+- Verificación sobre la fuente disponible el 26/10/2026 (sin incluir las ventas fechadas el 27/10): **CCC Michelob 285 → 299**, **CCC Latones 787 → 790**, con 17 compradores elegibles del combo, excluyendo `CLIE PEOPLE`. Las cifras son sólo de ese corte y se actualizan con Drive.
+
 ## Exclusión automática CLIE PEOPLE (19/10/2026)
 
 - La aplicación descarga también `REPORTE DE CLIENTES.xlsx` desde la carpeta de Drive existente.

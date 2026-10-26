@@ -53,6 +53,11 @@ COMBOS={
  '900456':('ung','redbull'),'900459':('ung',),'900460':('cervezas',),
  '900461':('cervezas','cero'),'900463':('cervezas','pure_gold'),
  '900464':('cervezas',),
+ # Combo nuevo Michelob 3 calibres (ventas desde 22/10/2026).
+ # Confirmado por el usuario: incluye lata Michelob Ultra 710cc (SKU 49827),
+ # por lo tanto aporta a CCC Michelob, CCC Latones y CCC Cervezas.
+ # No deducimos los otros dos componentes ni sus cantidades sin captura ERP.
+ '900472':('cervezas','mi','latones'),
 }
 # Desglose por *código exacto* según notas ERP del catálogo de combos de DDV.
 # Confirmados en capturas de CHESS, 15/10/2026.
