@@ -66,10 +66,10 @@ COMBOS={
  '900473':('cervezas','core'),         # Brahma y Quilmes 269 cc SUR
  # Conciliación del reporte oficial 19/10/2026: familias reconocibles
  # por nombre de combo; NO se inventan componentes SKU desconocidos.
- '900457':('ung','redbull'),           # Combo Red Bull 4 SKU: desglose pendiente
+ '900457':('ung','redbull'),           # Combo RB; captura CHESS: 3 SKU visibles (pese al nombre 4 SKU)
  '900465':('ung','h2oh'),             # Saborizadas Patagonia: CCC H2OH
- '900467':('ung',),                   # Gatorade K+T octubre: desglose pendiente
- '900469':('ung',),                   # Pet 500 octubre: desglose pendiente
+ '900467':('ung',),                   # Gatorade K+T octubre; captura CHESS verificada
+ '900469':('ung',),                   # PET 500 octubre; captura CHESS verificada
  '900470':('cervezas','core'),        # Brahma FT: CCC Innovaciones Core
 }
 
@@ -98,6 +98,11 @@ COMBO_UNG_SKUS = {
     '900455': ('16371','22256'),
     '900456': ('16371','16372','26422','29799','32710','58089'),
     '900459': ('30791','30793'),
+    # Capturas CHESS 27/10/2026; UNG SKU distintos, independientemente de las unidades.
+    '900457': ('16371','22256','32710'),          # RB 4 SKUS (CHESS muestra 3 artículos)
+    '900465': ('29815','29816'),                  # H2OH! saborizadas Patagonia
+    '900467': ('1418','1422','11522'),            # Gatorade K+T OCT
+    '900469': ('25645','30663','30791','30974'),# PET 500 OCT PAT 4
 }
 
 # Innovaciones Core confirmadas por el usuario (15/10/2026).
@@ -200,6 +205,66 @@ def obtener_componentes_innovaciones():
     return result
 
 
+def obtener_componentes_ung() -> dict[str, tuple[str, ...]]:
+    """Desgloses UNG de CHESS verificados, con CSV como catálogo extensible.
+
+    Nunca toma nombres de combos para inventar SKU. El CSV permite mantener
+    nuevos combos sin tocar código; si contradice un desglose ya verificado,
+    se detiene el cálculo para evitar métricas silenciosamente incorrectas.
+    """
+    componentes={k:tuple(dict.fromkeys(v)) for k,v in COMBO_UNG_SKUS.items()}
+    path=RAIZ/'combo_componentes.csv'
+    if not path.exists():
+        return componentes
+    catalogo=pd.read_csv(path,dtype=str,encoding='utf-8-sig').fillna('')
+    requeridas={'codigo','articulo_componente','unidad_negocio'}
+    faltantes=requeridas-set(catalogo.columns)
+    if faltantes:
+        raise ValueError('Catálogo de combos: faltan columnas '+', '.join(sorted(faltantes)))
+    catalogo['codigo']=catalogo['codigo'].astype(str).str.strip().str.lstrip('0')
+    catalogo['articulo_componente']=catalogo['articulo_componente'].astype(str).str.strip().str.lstrip('0')
+    catalogo['unidad_negocio']=catalogo['unidad_negocio'].map(canon)
+    ungs=catalogo.loc[catalogo['unidad_negocio'].eq('UNG') & catalogo['articulo_componente'].ne('')]
+    for codigo,group in ungs.groupby('codigo',sort=False):
+        skus=tuple(dict.fromkeys(group['articulo_componente']))
+        if codigo in componentes:
+            if set(componentes[codigo])!=set(skus):
+                raise ValueError(f'Composición UNG contradictoria del combo {codigo}: catálogo y motor no coinciden.')
+        else:
+            componentes[codigo]=skus
+    return componentes
+
+
+def familias_por_componentes() -> dict[str,set[str]]:
+    """Familias comerciales derivadas ÚNICAMENTE del desglose SKU del ERP."""
+    path=RAIZ/'combo_componentes.csv'
+    if not path.exists(): return {}
+    cat=pd.read_csv(path,dtype=str,encoding='utf-8-sig').fillna('')
+    req={'codigo','articulo_componente','unidad_negocio','descripcion','marca','calibre','division'}
+    if not req.issubset(cat):
+        raise ValueError('Catálogo de combos incompleto para clasificar familias.')
+    found={}
+    for row in cat.to_dict('records'):
+        codigo=str(row['codigo']).strip().lstrip('0')
+        sku=str(row['articulo_componente']).strip().lstrip('0')
+        marca=canon(row['marca']); desc=canon(row['descripcion'])
+        calibre=canon(row['calibre']); division=canon(row['division'])
+        unidad=canon(row['unidad_negocio'])
+        grupos=set()
+        if unidad=='UNG':grupos.add('ung')
+        if division=='CERVEZAS' or unidad in {'CZA','CERVEZAS'}:grupos.add('cervezas')
+        if sku in SKU_1890 or marca=='QUILMES 1890':grupos.add('1890')
+        if 'STELLA ARTOIS PURE GOLD' in marca or 'PURE GOLD' in desc:grupos.add('pure_gold')
+        if 'MICHELOB' in marca or 'MICHELOB' in desc:grupos.add('mi')
+        if marca in {'STELLA ARTOIS 0 0','QUILMES 0 0','CORONA CERO'} or re.search(r'\b0 0\b',desc):grupos.add('cero')
+        if re.search(r'\b710 CC LATAS\b',calibre):grupos.add('latones')
+        if marca=='H2OH' or 'H2OH' in desc:grupos.add('h2oh')
+        if 'RED BULL' in marca or 'RED BULL' in desc:grupos.add('redbull')
+        if clasificar_innovacion(sku,row['descripcion'],row['marca'],row['calibre'],row['division']):grupos.add('core')
+        if grupos: found.setdefault(codigo,set()).update(grupos)
+    return found
+
+
 def detalle_tbd_ung(x: pd.DataFrame, por_promotor:bool=False):
     base=x.loc[x['cliente'].ne('')].copy()
     combo=base['sku'].isin(COMBOS) | base['sku'].str.match(r'^900\d{3}$')
@@ -213,8 +278,9 @@ def detalle_tbd_ung(x: pd.DataFrame, por_promotor:bool=False):
 
     combos=base.loc[combo].groupby((['promotor'] if por_promotor else [])+['cliente','sku'],as_index=False)['bultos'].sum()
     combos=combos[combos['bultos'].gt(0)]
+    composiciones_ung=obtener_componentes_ung()
     expansiones=[]
-    for codigo,skus in COMBO_UNG_SKUS.items():
+    for codigo,skus in composiciones_ung.items():
         clientes=combos.loc[combos['sku'].eq(codigo), (['promotor'] if por_promotor else [])+['cliente']]
         if clientes.empty:
             continue
@@ -225,7 +291,8 @@ def detalle_tbd_ung(x: pd.DataFrame, por_promotor:bool=False):
     from_combo=pd.concat(expansiones,ignore_index=True) if expansiones else pd.DataFrame(columns=dims+['origen'])
     pares=pd.concat([directos,from_combo],ignore_index=True)
     pares=pares.groupby(dims,as_index=False,sort=True).agg(origen=('origen', lambda v:', '.join(sorted(set(v)))))
-    pendientes=combos.loc[combos['sku'].map(lambda code:'ung' in COMBOS.get(code,())) & ~combos['sku'].isin(COMBO_UNG_SKUS)]
+    catalogo_familias=familias_por_componentes()
+    pendientes=combos.loc[combos['sku'].map(lambda code:'ung' in (set(COMBOS.get(code,())) | catalogo_familias.get(code,set()))) & ~combos['sku'].isin(composiciones_ung)]
     agg_dims=(['promotor'] if por_promotor else [])+['sku']
     pendientes=pendientes.groupby(agg_dims,as_index=False).agg(clientes=('cliente','nunique'),compras_netas=('bultos','sum')).sort_values(agg_dims).reset_index(drop=True)
     return pares,pendientes
@@ -285,7 +352,9 @@ def compradores_innovaciones_core(x:pd.DataFrame, por_promotor:bool=False) -> pd
     pares, _, _ = detalle_innovaciones(x, por_promotor=por_promotor)
     cols = (['promotor'] if por_promotor else []) + ['cliente']
     directos = pares[cols].drop_duplicates()
-    codigos = [sku for sku, familias in COMBOS.items() if 'core' in familias]
+    familias_catalogo=familias_por_componentes()
+    codigos = sorted({sku for sku, familias in COMBOS.items() if 'core' in familias}
+                     | {sku for sku, familias in familias_catalogo.items() if 'core' in familias})
     if not codigos:
         return directos
     combo = x.loc[x['sku'].isin(codigos), cols+['sku','bultos']].copy()
@@ -310,8 +379,10 @@ def mask_por_indicador(x):
     flags['ung']=ordinary & unidad.eq('UNG')
     flags['h2oh']=ordinary & (marca.eq('H2OH')|desc.str.contains('H2OH',regex=False))
     flags['redbull']=ordinary & (marca.eq('RED BULL')|desc.str.contains('RED BULL|RB ZERO',regex=True))
+    familias_catalogo=familias_por_componentes()
     for k in flags:
-        combo_skus={s for s,v in COMBOS.items() if k in v}
+        combo_skus=({s for s,v in COMBOS.items() if k in v}
+                    | {s for s,v in familias_catalogo.items() if k in v})
         if combo_skus:
             flags[k] = flags[k] | (is_combo & sku.isin(combo_skus))
     return flags,is_combo
@@ -363,10 +434,18 @@ def compute_sales(bultos:pd.DataFrame,padron:pd.DataFrame,desde=None,hasta=None,
     detalle['bultos_neto_1890']=detalle['cliente_codigo'].map(known).fillna(0)
     combo_diagnostic=x.loc[is_combo & x['bultos'].ne(0),['sku','descripcion','cliente','bultos']].copy()
     combos_core=obtener_componentes_innovaciones()
+    catalogo_familias=familias_por_componentes()
+    composiciones_ung=obtener_componentes_ung()
     combo_diagnostic['familias_reconocidas']=combo_diagnostic['sku'].map(
-        lambda v:', '.join(sorted(set(COMBOS.get(v,())) | ({'core'} if v in combos_core else set()))))
-    combo_diagnostic['revisar']=combo_diagnostic['familias_reconocidas'].eq('')
-    combo_group=combo_diagnostic.groupby(['sku','descripcion','familias_reconocidas','revisar'],dropna=False,as_index=False).agg(clientes=('cliente','nunique'),combos_vendidos=('bultos','sum'))
+        lambda v:', '.join(sorted(set(COMBOS.get(v,())) | catalogo_familias.get(v,set()) | ({'core'} if v in combos_core else set()))))
+    combo_diagnostic['pendiente_desglose_ung']=combo_diagnostic['sku'].map(
+        lambda v:'ung' in (set(COMBOS.get(v,())) | catalogo_familias.get(v,set())) and v not in composiciones_ung)
+    combo_diagnostic['pendiente_desglose_core']=combo_diagnostic['sku'].map(
+        lambda v:'core' in (set(COMBOS.get(v,())) | catalogo_familias.get(v,set())) and v not in combos_core)
+    combo_diagnostic['revisar']=(combo_diagnostic['familias_reconocidas'].eq('')
+                                  | combo_diagnostic['pendiente_desglose_ung']
+                                  | combo_diagnostic['pendiente_desglose_core'])
+    combo_group=combo_diagnostic.groupby(['sku','descripcion','familias_reconocidas','pendiente_desglose_ung','pendiente_desglose_core','revisar'],dropna=False,as_index=False).agg(clientes=('cliente','nunique'),combos_vendidos=('bultos','sum'))
     return output,detalle,combo_group,x
 
 
@@ -395,7 +474,22 @@ def promotor_breakdown(x:pd.DataFrame, indicadores:list[str], padron:pd.DataFram
             venta=x.loc[mask,['promotor','cliente','bultos']].groupby(['promotor','cliente'],as_index=False)['bultos'].sum()
             serie=venta.loc[venta['bultos'].gt(0)].groupby('promotor')['cliente'].nunique()
         data[PROMOTOR_LABELS.get(ind,NOMBRES.get(ind,ind))]=data['Promotores'].map(serie).fillna(0).astype(int)
-    total={col:(data[col].sum() if col!='Promotores' else 'Totales') for col in data.columns}
+    # Totales deben conciliar con la primera solapa por unicidad global,
+    # NO con suma simple de promotores (puede duplicar clientes reasignados).
+    global_flags,_=mask_por_indicador(x)
+    total={'Promotores':'Totales'}
+    for ind in indicadores:
+        col=PROMOTOR_LABELS.get(ind,NOMBRES.get(ind,ind))
+        if ind=='ung':
+            valor=len(detalle_tbd_ung(x)[0])
+        elif ind=='core':
+            valor=compradores_innovaciones_core(x)['cliente'].nunique()
+        else:
+            mask=global_flags[ind] & x['cliente'].ne('')
+            if ind=='1890':mask=mask & x['cliente'].isin(padr)
+            venta=x.loc[mask,['cliente','bultos']].groupby('cliente',sort=False)['bultos'].sum()
+            valor=int(venta.gt(0).sum())
+        total[col]=int(valor)
     data=pd.concat([data,pd.DataFrame([total])],ignore_index=True)
     return data
 

@@ -1,17 +1,20 @@
-# Conciliación del informe comercial del 19 de octubre de 2026
+# Control histórico del 19/10/2026 · revisión con CHESS 27/10
 
-Fuente de referencia: `19.10 avance de coberturas.xlsx`, hojas `RESUMEN` (fila 12) y `BONUS` (fila 12). Solo Distribuidora Del Valle S.A.
+**La cuarta solapa de conciliación no existe en la interfaz.** El control histórico se conserva únicamente como documentación.
 
-La cuarta solapa presenta comparación reproducible, ajustando las ventas de Drive al 19/10 y eliminando CLIE PEOPLE.
+Con ventas del 1 al 19/10, padron vigente de 940 clientes, y exclusión CLIE PEOPLE:
 
-Diferencias del proyecto anterior (antes de incorporar nuevas familias de combos): CZA +1, 1890 -14, Latones +1, Core -4, TBD -38, H2OH -2. Pure Gold, Michelob, Sin alcohol y Red Bull coinciden.
+| Indicador | Informe | Dashboard | Diferencia |
+|---|---:|---:|---:|
+| Pure Gold | 217 | 217 | 0 |
+| Michelob | 205 | 205 | 0 |
+| Sin alcohol | 455 | 455 | 0 |
+| Cervezas | 1088 | 1089 | +1 |
+| 1890 P1/P4 | 614 | 600 | −14 |
+| Latones | 703 | 704 | +1 |
+| Innovaciones Core | 121 | 120 | −1 |
+| TBD UNG | 7379 | **7379** | **0** |
+| H2OH! | 246 | 246 | 0 |
+| Red Bull | 253 | 253 | 0 |
 
-Reparaciones de familia: combo 900465 aporta CCC H2OH y combo 900470 aporta CCC Innovaciones Core; este último no crea SKU ficticios. La composición de ambos es pendiente.
-
-1890: la versión de referencia contiene 957 códigos P1/P4 y la versión del 26/10, 940: 36 códigos salieron y 19 entraron entre ambas. 596 compradores están en ambos; 18 compradores se registraron solo en el padrón viejo y 4 solo en el nuevo. Esto explica exactamente 614 vs. 600. El objetivo 941 permanece sin cambios.
-
-Cervezas +1 (cliente 1146) y Latones +1 (cliente 5344) figuran con ventas 19/10 en el TXT vigente, pero no en el Excel congelado de esa fecha. No está validado si la explicación es diferencia de horario de actualización u otro ajuste posterior.
-
-Core -1 restante (cliente 1902), composición de los combos y TBD UNG -38 requieren reconciliación adicional. El Excel calcula TBD agrupando cliente, marca, calibre, sabor y familia; la app cuenta cliente y SKU. No son necesariamente métricas idénticas.
-
-**No se incluye el libro comercial completo** en el ZIP de GitHub; contiene datos de clientes y muchas hojas de pivotes.
+El TBD UNG coincide tras expandir los SKU de los cuatro combos documentados por capturas el 27/10. El resultado 1890 pertenece al padrón vigente de 940, distinto del universo de 957 usado por la referencia comercial. No se imponen valores oficiales al motor.
