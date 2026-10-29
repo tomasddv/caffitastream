@@ -71,6 +71,7 @@ COMBOS={
  '900467':('ung',),                   # Gatorade K+T octubre; captura CHESS verificada
  '900469':('ung',),                   # PET 500 octubre; captura CHESS verificada
  '900470':('cervezas','core'),        # Brahma FT: CCC Innovaciones Core
+ '900474':('cervezas','pure_gold'),   # PURE GOLD lata 473 cc + botella 330 cc; confirmado 29/10
 }
 
 # Desglose por *código exacto* según notas ERP del catálogo de combos de DDV.

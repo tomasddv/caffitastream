@@ -21,6 +21,7 @@ if str(BASE) in sys.path:
     sys.path.remove(str(BASE))
 sys.path.insert(0, str(BASE))
 from padron import cargar_padron
+import gestion_combos as gc
 
 _ENGINE_EXPORTS = (
     'DIA_ID', 'BULTOS_ID', 'NOMBRES', 'OBJETIVOS', 'leer_tsv', 'prepare',
@@ -267,6 +268,98 @@ except Exception as e:
     rows=[{'id':k,'nombre':name,'objetivo':OBJETIVOS[k],'real':None,'alcance':None,'faltan':None,'cobertura':None,'estado':'SIN DATOS DE DRIVE'} for k,name in NOMBRES.items()]
     detail=None; combos=None; valid_ok=False; xf=None; ultimo=None; reporte_ok=False; reporte_error=""
     excluidos_people=set(); excluidos_p1p4=0; padron_activo=padron
+
+# La alerta no agrega solapas: permanece visible arriba de los tres tableros.
+if valid_ok:
+    try:
+        catalogo_actual=gc.leer_catalogo(BASE/'combo_componentes.csv')
+        codigos_catalogados=set(catalogo_actual['codigo'].map(gc.cod))
+        codigos_conocidos=set(_ddv_motor.COMBOS)|codigos_catalogados
+        ventas_alerta=prep.loc[prep['fecha'].dt.date.between(desde,hasta)].copy()
+        combos_nuevos=gc.combos_sin_catalogar(ventas_alerta,codigos_conocidos)
+        if not combos_nuevos.empty:
+            cantidad=len(combos_nuevos)
+            st.warning(f'⚠️ **{cantidad} combo(s) nuevos sin clasificar en la venta diaria.** '
+                       'Pueden estar afectando CCC o TBD. Abrí **Registrar composición de combos** para cargar sus SKU.')
+            with st.sidebar:
+                st.warning(f'⚠️ {cantidad} combo(s) sin clasificar. Revisá el catálogo en la pantalla principal.')
+        else:
+            st.success('Catálogo de combos: no hay códigos nuevos sin clasificar en el período seleccionado.',icon='✅')
+        codigos_vendidos=ventas_alerta.loc[ventas_alerta['sku'].astype(str).str.fullmatch(r'900\d{3}'),'sku'].unique().tolist()
+        descripciones_combos=ventas_alerta.loc[ventas_alerta['sku'].isin(codigos_vendidos)].sort_values('fecha').drop_duplicates('sku',keep='last').set_index('sku')['descripcion'].to_dict()
+        codigos_nuevos=combos_nuevos['Código combo'].tolist()
+        opciones=codigos_nuevos+sorted(set(codigos_vendidos)-set(codigos_nuevos))
+        with st.expander('🧩 Registrar composición de combos · detección automática y carga manual',expanded=bool(codigos_nuevos)):
+            st.caption('La alerta examina TODOS los combos vendidos en el TXT del período, incluso si el comprador es CLIE PEOPLE. '
+                       'Los CCC/TBD mantienen su exclusión habitual. Los SKU se validan contra el archivo y también se pueden completar manualmente.')
+            if not combos_nuevos.empty:
+                st.dataframe(combos_nuevos,use_container_width=True,hide_index=True)
+            if opciones:
+                codigo_editar=st.selectbox('Combo para completar o revisar',opciones,
+                    format_func=lambda k:f'{"⚠️ NUEVO · " if k in codigos_nuevos else ""}{k} · {descripciones_combos.get(k, "Combo")}',key='combo_edicion_codigo')
+                anteriores=catalogo_actual.loc[catalogo_actual['codigo'].eq(codigo_editar)]
+                sugerencia=', '.join(anteriores['articulo_componente'].tolist()) if not anteriores.empty else ''
+                listado_skus=st.text_area('SKU que contiene el combo (separados por coma o salto de línea)',
+                    value=sugerencia,key=f'combo_skus_{codigo_editar}',placeholder='Ejemplo: 49807, 47707')
+                if st.button('1. Preparar componentes',key='preparar_combo',use_container_width=True):
+                    try:
+                        referencia=gc.referencia_articulos(prep)
+                        st.session_state['combo_borrador']=gc.borrador_filas(codigo_editar,listado_skus,referencia,catalogo_actual)
+                        st.session_state['combo_borrador_codigo']=codigo_editar
+                    except ValueError as err:st.error(str(err))
+                if st.session_state.get('combo_borrador_codigo')==codigo_editar:
+                    st.caption('Revisá nombre, unidad de negocio, marca, calibre y división. '
+                               'Esos campos determinan a qué CCC/TBD aporta cada SKU.')
+                    editado=st.data_editor(st.session_state['combo_borrador'],hide_index=True,
+                        disabled=['codigo','articulo_componente'],use_container_width=True,
+                        num_rows='fixed',key=f'componentes_editor_{codigo_editar}')
+                    try:
+                        referencia=gc.referencia_articulos(prep)
+                        nuevo=gc.construir_filas(codigo_editar, listado_skus, referencia,editado)
+                        hay_antes=not anteriores.empty
+                        if codigo_editar in _ddv_motor.COMBO_UNG_SKUS:
+                            verificados=set(_ddv_motor.COMBO_UNG_SKUS[codigo_editar])
+                            enviados=set(nuevo.loc[nuevo['unidad_negocio'].map(_ddv_motor.canon).eq('UNG'),'articulo_componente'])
+                            if verificados != enviados:
+                                raise ValueError('Este combo tiene un desglose UNG verificado en el motor. No se puede reemplazar con SKU contradictorios.')
+                        catalogo_resultante=gc.fusionar_catalogo(catalogo_actual,nuevo,reemplazar=hay_antes)
+                        salida=gc.csv_catalogo(catalogo_resultante)
+                        st.info(f'Validación: {len(nuevo)} SKU para el combo {codigo_editar}. '
+                                'Se contarán automáticamente según sus familias cuando el catálogo actualizado esté activo.')
+                        st.download_button('Descargar combo_componentes.csv actualizado',
+                            salida,file_name='combo_componentes.csv',mime='text/csv',key=f'catalogo_descargar_{codigo_editar}')
+                        st.caption('Si no configuraste el guardado automático, subí este CSV a la raíz del repositorio '
+                                   'reemplazando el archivo anterior y confirmá con Commit changes.')
+                        try:
+                            secretos=st.secrets
+                            token=str(secretos.get('GITHUB_TOKEN',''))
+                            pin_configurado=str(secretos.get('COMBO_EDITOR_PIN',''))
+                            github_repo=str(secretos.get('GITHUB_REPO','tomasddv/caffitastream'))
+                            github_branch=str(secretos.get('GITHUB_BRANCH','main'))
+                        except Exception:
+                            token='';pin_configurado='';github_repo='tomasddv/caffitastream';github_branch='main'
+                        if token and pin_configurado:
+                            pin=st.text_input('PIN de administrador para guardar en GitHub',type='password',key='combo_pin')
+                            if st.button('2. Guardar composición permanentemente en GitHub',type='primary',key='combo_guardar'):
+                                aprobado,_=gc.permisos_edicion(secretos,pin)
+                                if not aprobado:st.error('PIN incorrecto. No se guardaron cambios.')
+                                else:
+                                    try:
+                                        link=gc.guardar_csv_github(salida,token,github_repo,github_branch,
+                                            original=(BASE/'combo_componentes.csv').read_bytes())
+                                        st.success('Composición guardada en GitHub. Streamlit Cloud actualizará la app con el nuevo catálogo.')
+                                        st.markdown(f'[Ver commit en GitHub]({link})')
+                                        st.session_state.pop('combo_borrador',None)
+                                        st.session_state.pop('combo_borrador_codigo',None)
+                                    except Exception as err:st.error('Error al guardar en GitHub: '+str(err))
+                        else:
+                            st.info('Guardado permanente en un clic: configurá GITHUB_TOKEN y COMBO_EDITOR_PIN '
+                                    'en Settings → Secrets de Streamlit Cloud. Se mantiene disponible la descarga manual del CSV.')
+                    except (ValueError,KeyError) as err:
+                        st.error('No se puede guardar este desglose: '+str(err))
+            else:st.info('No aparecen combos vendidos en este período.')
+    except Exception as err:
+        st.error('No se pudo revisar el catálogo de combos: '+str(err))
 
 tab_general, tab_promotor, tab_ranking = st.tabs(['📊 Indicadores generales','👥 CCC y TBD por promotor','🏆 Ranking'])
 

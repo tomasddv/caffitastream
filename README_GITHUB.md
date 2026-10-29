@@ -119,3 +119,7 @@ Los cuatro se incluyen en TBD UNG por pares únicos **cliente+SKU** con compra n
 | 26/10 | 8.932 | 8.798 | **8.938** | **+6** |
 
 **La diferencia +6 del 26/10 sigue pendiente de conciliación por cliente y SKU.** No se fuerza el resultado a 8.932. El archivo `CATALOGO_CHESS_27_10.md` conserva el registro del desglose por unidades/bultos.
+
+## Registrar combos desde la misma aplicación
+
+La versión del 29/10 incorpora detección automática de nuevos combos y carga manual de componentes sin agregar otra solapa. Para habilitar guardado definitivo con un clic, configurar `GITHUB_TOKEN` (fine-grained, permiso Contents Read and write para este repositorio) y `COMBO_EDITOR_PIN` en **Streamlit Cloud → Settings → Secrets**. El token nunca se sube a GitHub. Si no se configura, la app ofrece descargar `combo_componentes.csv` para subirlo manualmente. Detalles en `INSTRUCCIONES_ALERTAS_COMBOS.md`.

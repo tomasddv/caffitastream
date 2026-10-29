@@ -207,3 +207,9 @@ Los cuatro se incluyen en TBD UNG por pares únicos **cliente+SKU** con compra n
 | 26/10 | 8.932 | 8.798 | **8.938** | **+6** |
 
 **La diferencia +6 del 26/10 sigue pendiente de conciliación por cliente y SKU.** No se fuerza el resultado a 8.932. El archivo `CATALOGO_CHESS_27_10.md` conserva el registro del desglose por unidades/bultos.
+
+## Novedad 29/10/2026: alerta automática de combos nuevos
+
+En la pantalla principal aparece una advertencia cuando `ventadiaria bultos.txt` incluye un combo `900xxx` que todavía no está en el catálogo. Abrí **Registrar composición de combos**, seleccioná el código, ingresá los SKU y completá los campos que falten. El catálogo actualizado puede guardarse en GitHub (con `GITHUB_TOKEN` y `COMBO_EDITOR_PIN` configurados en los secretos de Streamlit) o descargarse en CSV para reemplazar el anterior. Los CCC se recalculan desde el desglose en la siguiente actualización del código. Ver [INSTRUCCIONES_ALERTAS_COMBOS.md](INSTRUCCIONES_ALERTAS_COMBOS.md).
+
+El **900474 — COPIA COMBO PURE GOLD** ya está incorporado con los SKU **49807** (lata 473 cc) y **47707** (botella 330 cc) indicados por el usuario.
