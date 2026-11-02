@@ -16,7 +16,7 @@ REQUIRED = (
     'promotor_breakdown', 'PROMOTOR_LABELS',
 )
 def main():
-    for name in ('app.py', 'motor.py', 'padron.py', 'reporte_clientes.py'):
+    for name in ('app.py', 'motor.py', 'padron.py', 'reporte_clientes.py', 'fuentes_mensuales.py'):
         ast.parse((ROOT / name).read_text(encoding='utf8'), filename=name)
     assert Path(motor.__file__).resolve() == (ROOT/'motor.py').resolve(), 'El motor no corresponde a este repositorio'
     missing = [name for name in REQUIRED if not hasattr(motor, name)]

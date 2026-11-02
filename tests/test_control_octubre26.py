@@ -24,5 +24,6 @@ class CutoffOct26Tests(unittest.TestCase):
             self.assertEqual(len(clientes_clie_people(leer_reporte_clientes_xlsx(data.read_bytes()))),142)
     def test_control_fechas_en_app(self):
         text=(ROOT/'app.py').read_text(encoding='utf-8')
-        self.assertIn('control_referencia_19_10_2026.csv',text)
-        self.assertIn('control_referencia_26_10_2026.csv',text)
+        self.assertNotIn('with tab_control:',text)
+        self.assertNotIn('🔎 Control oficial',text)
+        self.assertIn('tab_general, tab_promotor, tab_ranking = st.tabs(',text)

@@ -11,7 +11,7 @@ import io
 import pandas as pd
 
 RAIZ=Path(__file__).resolve().parent
-DIA_ID='190CTcpwpXnb3r8jBMnwDYJVWsED8hVI2'
+DIA_ID='1I-vewZKeotS02twpDgSnmAbYjKT4mlXG'
 BULTOS_ID='169T6XFTCJpPManqx3dUR_-0nR1rJ4TZT'
 EXPECTED={"Cod. Cliente","Código","Descripción.2","Descripción.3","Descripción.4","Descripción.5","Descripción.8","Cantidades Totales","Descripción Período"}
 OBJETIVOS={"pure_gold":259,"mi":340,"cero":526,"cervezas":1179,"1890":941,"latones":832,"core":376,"ung":10113,"h2oh":326,"redbull":270}

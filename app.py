@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import html
 import tempfile
+from datetime import date
 import os
 import re
 from pathlib import Path
@@ -22,6 +23,7 @@ if str(BASE) in sys.path:
 sys.path.insert(0, str(BASE))
 from padron import cargar_padron
 import gestion_combos as gc
+import fuentes_mensuales as fm
 
 _ENGINE_EXPORTS = (
     'DIA_ID', 'BULTOS_ID', 'NOMBRES', 'OBJETIVOS', 'leer_tsv', 'prepare',
@@ -112,13 +114,34 @@ def drive_txt(file_id:str):
     raise RuntimeError('No pude descargar el TXT desde Drive. '+ '; '.join(failures))
 
 @st.cache_data(ttl=300,show_spinner=False)
-def load_both():
-    raw1=drive_txt(DIA_ID); raw2=drive_txt(BULTOS_ID)
-    vol=leer_tsv(raw1); bul=leer_tsv(raw2)
-    ok,exp=validate_reconciliation(vol,bul)
-    if not ok:
-        raise ValueError('Fuente desactualizada: '+exp+' El tablero no mostrará cifras inconsistentes.')
-    return vol,bul
+def resolver_fuentes_mensuales(hoy:date):
+    try:
+        entries={**fm.FALLBACK,**fm.inventario_publico()}
+        return fm.fuentes_por_periodo(entries,hoy),None
+    except Exception as exc:
+        # Conservar la operación actual aun cuando Google no permita listar
+        # la carpeta; nunca usar este fallback para fingir meses futuros.
+        entries=dict(fm.FALLBACK)
+        return fm.fuentes_por_periodo(entries,hoy),str(exc)
+
+
+@st.cache_data(ttl=300,show_spinner=False)
+def load_month(ym:tuple[int,int],vol_id:str|None,bul_id:str|None):
+    if not vol_id and not bul_id:
+        raise ValueError(f'No encuentro archivos para {fm.periodo_nombre(ym)} en Drive.')
+    cierre=ym!= (datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).year,
+                  datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).month)
+    if vol_id and bul_id:
+        vol=fm.filtrar_y_validar_mes(leer_tsv(drive_txt(vol_id)),ym)
+        bul=fm.filtrar_y_validar_mes(leer_tsv(drive_txt(bul_id)),ym)
+        ok,exp=validate_reconciliation(vol,bul)
+        if not ok:
+            raise ValueError('Los TXT del mismo mes no están sincronizados: '+exp)
+        return vol,bul,False
+    if cierre and vol_id and not bul_id:
+        vol=fm.filtrar_y_validar_mes(leer_tsv(drive_txt(vol_id)),ym)
+        return vol,fm.volumen_para_conteo(vol),True
+    raise ValueError(f'Para calcular {fm.periodo_nombre(ym)} faltan los TXT de volumen y bultos.')
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -221,22 +244,31 @@ def promotor_table_html(df: pd.DataFrame):
     return html_table
 
 st.title('Distribuidora del Valle | Indicadores comerciales')
-st.caption('Fuente exclusiva de ventas: Google Drive · Lectura automática de columnas · Incluye combos conocidos · Padrón P1 + P4')
+st.caption('Fuente: Drive · Mes corriente o cierre del mes anterior · Incluye combos conocidos · Padrón P1 + P4')
 padron=cargar_padron()
-
+hoy_ar=datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).date()
+current_ym=(hoy_ar.year,hoy_ar.month)
+previous_ym=fm.mes_anterior(hoy_ar)
+period_options={'📈 Mes corriente · '+fm.periodo_nombre(current_ym):current_ym,
+                '🔒 Mes anterior cerrado · '+fm.periodo_nombre(previous_ym):previous_ym}
 with st.sidebar:
-    st.header('Actualización')
-    st.caption('Fuentes: ventadiaria.txt, ventadiaria bultos.txt y reporte de clientes.xlsx actualizado el 26/10/2026 · Google Drive')
+    st.header('Período de ventas')
+    vista_label=st.radio('Vista',list(period_options),key='vista_mensual')
+    selected_ym=period_options[vista_label]
     if st.button('🔄 Actualizar desde Drive',use_container_width=True):
-        drive_txt.clear(); load_both.clear(); load_reporte_clientes.clear(); st.rerun()
-    st.caption('Se lee al abrir y con Actualizar desde Drive. La caché vence cada 5 minutos.')
-    st.metric('Padrón P1 + P4 original', f'{len(padron):,}'.replace(',','.'))
+        drive_txt.clear(); resolver_fuentes_mensuales.clear(); load_month.clear()
+        load_reporte_clientes.clear(); st.rerun()
+    st.caption('Se leen automáticamente los nombres de los TXT en la carpeta de Drive, sin mezclar meses. La caché vence a los 5 minutos.')
+    st.metric('Padrón P1 + P4', f'{len(padron):,}'.replace(',','.'))
 
 try:
-    with st.spinner('Descargando ventas y clasificación de clientes desde Google Drive...'):
-        vol,bultos=load_both()
-        # La clasificación CLIE PEOPLE es obligatoria para todos los KPI.
-        # Si falla este reporte no se muestran indicadores sin filtrar.
+    with st.spinner(f'Cargando {fm.periodo_nombre(selected_ym)} y clasificación de clientes desde Drive...'):
+        fuentes,error_inventario=resolver_fuentes_mensuales(hoy_ar)
+        if error_inventario:
+            st.warning('No se pudo listar automáticamente toda la carpeta de Drive. Se usan IDs de contingencia ya verificados. '
+                       'Para próximos cierres es necesario poder consultar la carpeta. Detalle: '+error_inventario)
+        periodo_fuente=fuentes[selected_ym]
+        vol,bultos,cierre_parcial=load_month(selected_ym,periodo_fuente['volumen'],periodo_fuente['bultos'])
         reporte_clientes=load_reporte_clientes()
         excluidos_people=clientes_clie_people(reporte_clientes)
         padron_activo=filtrar_padron_people(padron,excluidos_people)
@@ -246,28 +278,39 @@ try:
     fechas=prep['fecha'].dropna()
     if fechas.empty: raise ValueError('No se identificaron fechas de venta.')
     ultimo=fechas.max().date(); primero=fechas.min().date()
-    hoy_ar=datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).date()
-    corte_default=min(ultimo,hoy_ar)
-    if corte_default < primero: raise ValueError('La fuente no contiene ventas correspondientes a fechas hasta hoy.')
+    minimo_mes,maximo_mes=fm.periodo_bounds(selected_ym)
+    corte_default=min(ultimo,hoy_ar) if selected_ym==current_ym else ultimo
+    if corte_default < primero: raise ValueError('No hay ventas válidas hasta el día seleccionado.')
     with st.sidebar:
-        st.success(f'Drive conectado · {len(bultos):,} registros'.replace(',','.'))
-        st.caption(f'Ventas cargadas: {primero:%d/%m/%Y} al {ultimo:%d/%m/%Y}')
-        if ultimo>hoy_ar: st.warning('Drive contiene fechas futuras; por defecto se excluyen del indicador.')
-        periodo=st.date_input('Período de análisis',value=(primero,corte_default),min_value=primero,max_value=ultimo)
+        st.success(f'{fm.periodo_nombre(selected_ym)} · {len(bultos):,} registros'.replace(',','.'))
+        st.caption(f'Ventas: {primero:%d/%m/%Y} al {ultimo:%d/%m/%Y}')
+        if ultimo>hoy_ar: st.warning('Drive contiene fechas futuras; se excluyen por defecto.')
+        periodo=st.date_input('Rango dentro del mes',value=(primero,corte_default),
+                              min_value=minimo_mes,max_value=maximo_mes,key=f'rango_{selected_ym[0]}_{selected_ym[1]}')
     if isinstance(periodo,(tuple,list)) and len(periodo)==2:
         desde,hasta=periodo
     else:
         desde,hasta=primero,corte_default
+    if desde>hasta: raise ValueError('El inicio del período es posterior al fin.')
+    if cierre_parcial:
+        st.warning('⚠️ **Cierre histórico provisional:** existe `ventadiaria '+fm.MES_NOMBRES[selected_ym[1]-1]+'.txt` '
+                   'pero NO el archivo `ventadiaria bultos '+fm.MES_NOMBRES[selected_ym[1]-1]+'.txt`. '
+                   'Los CCC/TBD se estiman con volúmenes e importes: los combos con volumen 0 se aproximan por signo del importe. '
+                   'No se puede certificar el resultado ni mostrar bultos reales hasta guardar el TXT de bultos del mes cerrado.')
+    if selected_ym==current_ym:
+        st.caption('📈 **Avance del mes corriente:** solamente ventas de '+fm.periodo_nombre(current_ym)+'.')
+    else:
+        st.caption('🔒 **Cierre del mes anterior:** solamente ventas de '+fm.periodo_nombre(previous_ym)+'.')
     rows,detail,combos,xf=compute_sales(bultos,padron_activo,desde,hasta,excluir_clientes=excluidos_people)
     detail=enriquecer_padron_1890(detail,reporte_clientes)
     valid_ok=True
     reporte_error=''
 except Exception as e:
-    st.error('No pude calcular los indicadores con la información actual de Drive: '+str(e))
-    st.info('No se muestran indicadores sin aplicar la exclusión CLIE PEOPLE. Revisá acceso a los dos TXT y a REPORTE DE CLIENTES en Drive.')
+    st.error('No pude calcular los indicadores de '+fm.periodo_nombre(selected_ym)+': '+str(e))
+    st.info('La vista del otro mes puede seguir funcionando. Se requiere REPORTE DE CLIENTES para excluir CLIE PEOPLE.')
     rows=[{'id':k,'nombre':name,'objetivo':OBJETIVOS[k],'real':None,'alcance':None,'faltan':None,'cobertura':None,'estado':'SIN DATOS DE DRIVE'} for k,name in NOMBRES.items()]
     detail=None; combos=None; valid_ok=False; xf=None; ultimo=None; reporte_ok=False; reporte_error=""
-    excluidos_people=set(); excluidos_p1p4=0; padron_activo=padron
+    excluidos_people=set(); excluidos_p1p4=0; padron_activo=padron; cierre_parcial=False
 
 # La alerta no agrega solapas: permanece visible arriba de los tres tableros.
 if valid_ok:
@@ -368,7 +411,7 @@ with tab_general:
     if valid_ok:
         st.caption(f'Exclusión automática: {len(excluidos_people)} clientes CLIE PEOPLE fuera de TODOS los indicadores; {excluidos_p1p4} pertenecían al padrón P1/P4. Objetivos comerciales sin modificar.')
         summary=pd.DataFrame(rows)
-        st.caption(f'Corte de ventas: **{ultimo:%d/%m/%Y}** · Selección: **{desde:%d/%m/%Y} al {hasta:%d/%m/%Y}** · {len(xf):,} registros evaluados'.replace(',','.'))
+        st.caption(f'Período: **{fm.periodo_nombre(selected_ym)}** · Selección: **{desde:%d/%m/%Y} al {hasta:%d/%m/%Y}** · {len(xf):,} registros evaluados'.replace(',','.'))
         st.subheader('Seguimiento y detalle')
         resumen_vista=summary[['nombre','objetivo','real','alcance','faltan','cobertura','estado']].copy()
         for campo in ['alcance','cobertura']:
@@ -414,7 +457,7 @@ with tab_general:
         a.metric('Clientes P1/P4 elegibles',len(padron_activo))
         b.metric('Compraron 1890',int(detail['estado_1890'].eq('Compró').sum()))
         c.metric('No compraron 1890',int(detail['estado_1890'].eq('No compró').sum()))
-        st.caption(f'CLIE PEOPLE excluidos del padrón: {excluidos_p1p4}. Compras: TXT de ventas del período seleccionado. Fantasía, subcanal y promotor: REPORTE DE CLIENTES de Drive. La asignación comercial puede diferir del vendedor que realizó una venta.')
+        st.caption(f'CLIE PEOPLE excluidos del padrón: {excluidos_p1p4}. Compras: TXT de {fm.periodo_nombre(selected_ym)}. Fantasía, subcanal y promotor: REPORTE DE CLIENTES de Drive.')
         if reporte_ok:
             sin_cruce=int(detail['estado_cruce'].eq('No figura en reporte').sum())
             sin_promotor=int(detail['promotor'].eq('Sin asignar').sum())
@@ -438,11 +481,12 @@ with tab_general:
             ver=listado.rename(columns={
                 'cliente_codigo':'Código de cliente', 'nombre_fantasia':'Nombre de fantasía',
                 'razon_social':'Razón social', 'promotor':'Promotor', 'ruta_venta':'Ruta',
-                'estado_1890':'Estado 1890', 'bultos_neto_1890':'Bultos netos 1890',
+                'estado_1890':'Estado 1890', 'bultos_neto_1890':('Volumen neto 1890 (hL; provisional)' if cierre_parcial else 'Bultos netos 1890'),
                 'estado_cruce':'Coincidencia con reporte',
             })
+            cantidad_col='Volumen neto 1890 (hL; provisional)' if cierre_parcial else 'Bultos netos 1890'
             visible=[c for c in ['Código de cliente','Nombre de fantasía','Razón social',
-                       'Promotor','Ruta','Estado 1890','Bultos netos 1890','Coincidencia con reporte'] if c in ver.columns]
+                       'Promotor','Ruta','Estado 1890',cantidad_col,'Coincidencia con reporte'] if c in ver.columns]
             ver=ver[visible].sort_values(['Promotor','Estado 1890','Nombre de fantasía'],kind='stable')
             f1,f2,f3=st.columns(3)
             f1.metric('Clientes filtrados',len(ver))

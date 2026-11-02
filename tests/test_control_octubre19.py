@@ -25,14 +25,14 @@ class ControlOctubre19Test(unittest.TestCase):
         rows,_,_,x=compute_sales(pd.DataFrame(ventas),pad,date(2026,10,1),date(2026,10,19),excluir_clientes=excluir)
         return {v['id']:v['real'] for v in rows}, x, pad
 
-    def test_combo_saborizadas_suma_h2oh_sin_adjudicar_sku_falso(self):
+    def test_combo_saborizadas_suma_h2oh_y_sus_dos_sku(self):
         self.assertIn('h2oh',COMBOS['900465'])
-        self.assertNotIn('900465',COMBO_UNG_SKUS)
+        self.assertEqual(COMBO_UNG_SKUS['900465'],('29815','29816'))
         valores,x,pad=self.correr(venta('101','900465',1))
         self.assertEqual(valores['h2oh'],1)
-        self.assertEqual(valores['ung'],0)
+        self.assertEqual(valores['ung'],2)
         _,pendientes=detalle_tbd_ung(x)
-        self.assertEqual(pendientes.sku.tolist(),['900465'])
+        self.assertTrue(pendientes.empty)
         self.assertEqual(int(promotor_breakdown(x,['h2oh'],pad).iloc[-1]['Ccc H2oh']),1)
 
     def test_brahma_ft_comprador_con_composicion_parcial(self):
@@ -47,10 +47,10 @@ class ControlOctubre19Test(unittest.TestCase):
                               venta('103','900470',1,fecha='20-oct-26'),excluir={'102'})
         self.assertEqual(valores['core'],0)
 
-    def test_nuevo_combo_gatorade_se_senala_pendiente(self):
+    def test_nuevo_combo_gatorade_expande_tres_sku(self):
         self.assertIn('ung',COMBOS['900467'])
         vals,x,_=self.correr(venta('101','900467',1))
-        self.assertEqual(vals['ung'],0)
-        self.assertEqual(detalle_tbd_ung(x)[1].sku.tolist(),['900467'])
+        self.assertEqual(vals['ung'],3)
+        self.assertTrue(detalle_tbd_ung(x)[1].empty)
 
 if __name__=='__main__':unittest.main()
