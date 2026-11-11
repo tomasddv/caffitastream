@@ -1,10 +1,12 @@
 import unittest
 from padron import cargar_padron
 from motor import OBJETIVOS
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
 
 class TestPadronVigente(unittest.TestCase):
     def test_padron_unico_940(self):
-        p = cargar_padron()
+        p = cargar_padron(ROOT/'clientes_p1_p4_2026_10.csv')
         self.assertEqual(len(p), 940)
         self.assertEqual(p['cliente_codigo'].nunique(), 940)
         self.assertNotIn('3913', set(p['cliente_codigo']))

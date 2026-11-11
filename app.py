@@ -56,6 +56,44 @@ from reporte_clientes import (
     clientes_clie_people, filtrar_padron_people,
 )
 st.set_page_config(page_title='DDV | Indicadores automáticos',page_icon='📊',layout='wide')
+
+NOVIEMBRE_2026_OBJETIVOS={
+    'pure_gold':354,'mi':361,'cero':599,'cervezas':1179,'latones':879,
+    'core':323,'ung':10324,'h2oh':359,'redbull':345,
+}
+NOVIEMBRE_2026_NOMBRES={'core':'CCC 269','redbull':'CCC BLACK'}
+
+def objetivos_periodo(ym:tuple[int,int], padron_len:int|None=None)->dict[str,int]:
+    goals=dict(OBJETIVOS)
+    if ym==(2026,11):
+        goals.update(NOVIEMBRE_2026_OBJETIVOS)
+        if padron_len is not None:
+            goals['1890']=int(round(padron_len*0.80))
+    return goals
+
+def nombres_periodo(ym:tuple[int,int])->dict[str,str]:
+    names=dict(NOMBRES)
+    if ym==(2026,11):
+        names.update(NOVIEMBRE_2026_NOMBRES)
+    return names
+
+def armonizar_rows_periodo(rows, ym:tuple[int,int], padron_len:int|None=None):
+    goals=objetivos_periodo(ym,padron_len)
+    names=nombres_periodo(ym)
+    out=[]
+    for row in rows:
+        r=dict(row)
+        r['nombre']=names.get(r['id'], r.get('nombre', r['id']))
+        goal=goals.get(r['id'], r.get('objetivo'))
+        r['objetivo']=goal
+        real=r.get('real')
+        if real is not None and goal not in (None,0):
+            r['alcance']=real/goal
+            r['faltan']=max(0,goal-real)
+        if r['id']=='1890' and real is not None and padron_len:
+            r['cobertura']=real/padron_len
+        out.append(r)
+    return out
 st.markdown("""<style>
 /* Paleta clara con todos los caracteres en negro, incluso en widgets y avisos. */
 :root {color-scheme:light;}
@@ -191,8 +229,8 @@ p{margin:0;min-height:27px;font-size:10px;color:#000}
 
 def promotor_table_html(df: pd.DataFrame):
     color_map={
-        'Ccc H2oh':'#6eb6ff','Ccc Red bull':'#9db2ff','Ccc Stella Pure Gold':'#87d59d',
-        'Ccc Michelob':'#2f8fef','Ccc 0.0':'#f0b4bd','Ccc Innovaciones Core':'#90d7a3',
+        'Ccc H2oh':'#6eb6ff','Ccc Red bull':'#9db2ff','Ccc Black':'#9db2ff','Ccc Stella Pure Gold':'#87d59d',
+        'Ccc Michelob':'#2f8fef','Ccc 0.0':'#f0b4bd','Ccc Innovaciones Core':'#90d7a3','Ccc 269':'#90d7a3',
         'Ccc 1890 P1/P4':'#f3c66d','Ccc Latones':'#ffd166','Ccc Cervezas':'#c7d2fe','Tbd Ung':'#b7a6ff'
     }
     cols=list(df.columns)
@@ -245,7 +283,15 @@ def promotor_table_html(df: pd.DataFrame):
 
 st.title('Distribuidora del Valle | Indicadores comerciales')
 st.caption('Fuente: Drive · Mes corriente o cierre del mes anterior · Incluye combos conocidos · Padrón P1 + P4')
-padron=cargar_padron()
+def cargar_padron_periodo(ym:tuple[int,int]):
+    """Congela los padrones cerrados para no alterar coberturas históricas."""
+    if ym == (2026, 10):
+        return cargar_padron(BASE / 'clientes_p1_p4_2026_10.csv')
+    if ym == (2026, 11):
+        return cargar_padron(BASE / 'clientes_p1_p4_2026_11.csv')
+    # Para meses futuros: el padrón actualizado manualmente del proyecto.
+    return cargar_padron(BASE / 'clientes_p1_p4.csv')
+
 hoy_ar=datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).date()
 current_ym=(hoy_ar.year,hoy_ar.month)
 previous_ym=fm.mes_anterior(hoy_ar)
@@ -255,6 +301,8 @@ with st.sidebar:
     st.header('Período de ventas')
     vista_label=st.radio('Vista',list(period_options),key='vista_mensual')
     selected_ym=period_options[vista_label]
+    padron=cargar_padron_periodo(selected_ym)
+    _ddv_motor.set_runtime_profile(selected_ym)
     if st.button('🔄 Actualizar desde Drive',use_container_width=True):
         drive_txt.clear(); resolver_fuentes_mensuales.clear(); load_month.clear()
         load_reporte_clientes.clear(); st.rerun()
@@ -302,6 +350,7 @@ try:
     else:
         st.caption('🔒 **Cierre del mes anterior:** solamente ventas de '+fm.periodo_nombre(previous_ym)+'.')
     rows,detail,combos,xf=compute_sales(bultos,padron_activo,desde,hasta,excluir_clientes=excluidos_people)
+    rows=armonizar_rows_periodo(rows,selected_ym,len(padron_activo))
     detail=enriquecer_padron_1890(detail,reporte_clientes)
     valid_ok=True
     reporte_error=''
@@ -309,6 +358,7 @@ except Exception as e:
     st.error('No pude calcular los indicadores de '+fm.periodo_nombre(selected_ym)+': '+str(e))
     st.info('La vista del otro mes puede seguir funcionando. Se requiere REPORTE DE CLIENTES para excluir CLIE PEOPLE.')
     rows=[{'id':k,'nombre':name,'objetivo':OBJETIVOS[k],'real':None,'alcance':None,'faltan':None,'cobertura':None,'estado':'SIN DATOS DE DRIVE'} for k,name in NOMBRES.items()]
+    rows=armonizar_rows_periodo(rows,selected_ym,len(padron))
     detail=None; combos=None; valid_ok=False; xf=None; ultimo=None; reporte_ok=False; reporte_error=""
     excluidos_people=set(); excluidos_p1p4=0; padron_activo=padron; cierre_parcial=False
 
@@ -419,16 +469,19 @@ with tab_general:
         st.dataframe(resumen_vista,use_container_width=True,hide_index=True)
         st.download_button('Descargar indicadores CSV',summary.to_csv(index=False).encode('utf-8-sig'),file_name='ddv_indicadores.csv',mime='text/csv')
 
-        st.subheader('Innovaciones Core · Brahma y Quilmes 269 cc + Brahma FT')
-        st.caption('Real = clientes únicos con compra neta positiva de cualquier innovación. Un mismo cliente cuenta una sola vez, aunque compre varios SKU y bultos.')
+        core_titulo='CCC 269' if selected_ym==(2026,11) else 'Innovaciones Core · Brahma y Quilmes 269 cc + Brahma FT'
+        core_caption=('Real = clientes únicos con compra neta positiva de Brahma y Quilmes 269 cc. Un mismo cliente cuenta una sola vez, aunque compre varios SKU y bultos.' if selected_ym==(2026,11) else 'Real = clientes únicos con compra neta positiva de cualquier innovación. Un mismo cliente cuenta una sola vez, aunque compre varios SKU y bultos.')
+        st.subheader(core_titulo)
+        st.caption(core_caption)
         innov_pares, innov_resumen, innov_pendientes=detalle_innovaciones(xf)
         c1,c2,c3=st.columns(3)
         compradores_core_actual=compradores_innovaciones_core(xf)
-        c1.metric('Clientes compradores de innovaciones',len(compradores_core_actual))
-        c2.metric('Objetivo comercial',OBJETIVOS['core'])
-        c3.metric('Alcance',f'{len(compradores_core_actual) / OBJETIVOS["core"]:.1%}')
+        c1.metric('Clientes compradores de innovaciones' if selected_ym!=(2026,11) else 'Clientes compradores 269',len(compradores_core_actual))
+        goals_actual=objetivos_periodo(selected_ym,len(padron_activo))
+        c2.metric('Objetivo comercial',goals_actual['core'])
+        c3.metric('Alcance',f'{len(compradores_core_actual) / goals_actual["core"]:.1%}')
         st.dataframe(innov_resumen.rename(columns={'familia':'Producto','clientes':'Clientes','skus':'SKU distintos vendidos'}),use_container_width=True,hide_index=True)
-        st.caption('El CCC también incluye los combos Core reconocidos por familia (900470 y 900473). Los componentes desconocidos no se atribuyen a SKU individuales.')
+        st.caption('El CCC también incluye los combos reconocidos por familia. Los componentes desconocidos no se atribuyen a SKU individuales.')
         with st.expander('Ver y descargar detalle de innovaciones por cliente y SKU'):
             st.dataframe(innov_pares,use_container_width=True,hide_index=True)
             st.download_button('Descargar clientes / SKU Innovaciones',innov_pares.to_csv(index=False).encode('utf-8-sig'),file_name='innovaciones_core_clientes_sku.csv',mime='text/csv')

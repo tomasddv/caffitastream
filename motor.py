@@ -14,13 +14,33 @@ RAIZ=Path(__file__).resolve().parent
 DIA_ID='1I-vewZKeotS02twpDgSnmAbYjKT4mlXG'
 BULTOS_ID='169T6XFTCJpPManqx3dUR_-0nR1rJ4TZT'
 EXPECTED={"Cod. Cliente","Código","Descripción.2","Descripción.3","Descripción.4","Descripción.5","Descripción.8","Cantidades Totales","Descripción Período"}
-OBJETIVOS={"pure_gold":259,"mi":340,"cero":526,"cervezas":1179,"1890":941,"latones":832,"core":376,"ung":10113,"h2oh":326,"redbull":270}
-NOMBRES={"pure_gold":"CCC SA PURE GOLD","mi":"CCC MI","cero":"CCC 0.0%","cervezas":"CERVEZAS","1890":"Cobertura 1890 P1 & P4","latones":"CCC LATONES","core":"CCC INNOVACIONES CORE","ung":"TBD UNG","h2oh":"CCC H2OH!","redbull":"CCC RED BULL"}
-PROMOTOR_LABELS={
+DEFAULT_OBJETIVOS={"pure_gold":259,"mi":340,"cero":526,"cervezas":1179,"1890":941,"latones":832,"core":376,"ung":10113,"h2oh":326,"redbull":270}
+DEFAULT_NOMBRES={"pure_gold":"CCC SA PURE GOLD","mi":"CCC MI","cero":"CCC 0.0%","cervezas":"CERVEZAS","1890":"Cobertura 1890 P1 & P4","latones":"CCC LATONES","core":"CCC INNOVACIONES CORE","ung":"TBD UNG","h2oh":"CCC H2OH!","redbull":"CCC RED BULL"}
+DEFAULT_PROMOTOR_LABELS={
     'h2oh':'Ccc H2oh','redbull':'Ccc Red bull','pure_gold':'Ccc Stella Pure Gold',
     'mi':'Ccc Michelob','cero':'Ccc 0.0','core':'Ccc Innovaciones Core',
     '1890':'Ccc 1890 P1/P4','latones':'Ccc Latones','cervezas':'Ccc Cervezas','ung':'Tbd Ung'
 }
+OBJETIVOS=dict(DEFAULT_OBJETIVOS)
+NOMBRES=dict(DEFAULT_NOMBRES)
+PROMOTOR_LABELS=dict(DEFAULT_PROMOTOR_LABELS)
+ACTIVE_PROFILE='default'
+
+def set_runtime_profile(ym=None):
+    """Ajusta nombres, objetivos visuales y reglas especiales por período."""
+    global ACTIVE_PROFILE
+    profile='2026-11' if tuple(ym or ())==(2026,11) else 'default'
+    ACTIVE_PROFILE=profile
+    OBJETIVOS.clear(); OBJETIVOS.update(DEFAULT_OBJETIVOS)
+    NOMBRES.clear(); NOMBRES.update(DEFAULT_NOMBRES)
+    PROMOTOR_LABELS.clear(); PROMOTOR_LABELS.update(DEFAULT_PROMOTOR_LABELS)
+    if profile=='2026-11':
+        OBJETIVOS.update({'pure_gold':354,'mi':361,'cero':599,'latones':879,'core':323,'ung':10324,'h2oh':359,'redbull':345})
+        NOMBRES['core']='CCC 269'
+        NOMBRES['redbull']='CCC BLACK'
+        PROMOTOR_LABELS['core']='Ccc 269'
+        PROMOTOR_LABELS['redbull']='Ccc Black'
+    return profile
 PROMOTOR_ALIASES={
     'FEDERICO BISS':'Fede','MATIAS GARCIA':'Mati','SIRI MARTIN':'Martin','NICOLAS POCHETINO':'Nico',
     'VILLAGRA ENZO':'Enzo','NICASTRO LUCAS':'Lucas','GASTON FABRE':'Gaston','MENDEZ CARLOS':'Carlos',
@@ -260,8 +280,12 @@ def familias_por_componentes() -> dict[str,set[str]]:
         if marca in {'STELLA ARTOIS 0 0','QUILMES 0 0','CORONA CERO'} or re.search(r'\b0 0\b',desc):grupos.add('cero')
         if re.search(r'\b710 CC LATAS\b',calibre):grupos.add('latones')
         if marca=='H2OH' or 'H2OH' in desc:grupos.add('h2oh')
-        if 'RED BULL' in marca or 'RED BULL' in desc:grupos.add('redbull')
-        if clasificar_innovacion(sku,row['descripcion'],row['marca'],row['calibre'],row['division']):grupos.add('core')
+        if ACTIVE_PROFILE=='2026-11':
+            if 'PEPSI BLACK' in marca or 'PEPSI BLACK' in desc:grupos.add('redbull')
+            if sku in INNOVACIONES_269:grupos.add('core')
+        else:
+            if 'RED BULL' in marca or 'RED BULL' in desc:grupos.add('redbull')
+            if clasificar_innovacion(sku,row['descripcion'],row['marca'],row['calibre'],row['division']):grupos.add('core')
         if grupos: found.setdefault(codigo,set()).update(grupos)
     return found
 
@@ -350,12 +374,20 @@ def compradores_innovaciones_core(x:pd.DataFrame, por_promotor:bool=False) -> pd
     y cotejado con el informe comercial, aunque la composición SKU del ERP
     todavía está pendiente. Cuenta una vez en CCC pero NO se inventan SKU.
     """
-    pares, _, _ = detalle_innovaciones(x, por_promotor=por_promotor)
     cols = (['promotor'] if por_promotor else []) + ['cliente']
-    directos = pares[cols].drop_duplicates()
+    if ACTIVE_PROFILE=='2026-11':
+        flags,_=mask_por_indicador(x)
+        venta=x.loc[flags['core'] & x['cliente'].ne(''), cols+['bultos']].groupby(cols,as_index=False)['bultos'].sum()
+        directos=venta.loc[venta['bultos'].gt(0), cols].drop_duplicates()
+    else:
+        pares, _, _ = detalle_innovaciones(x, por_promotor=por_promotor)
+        directos = pares[cols].drop_duplicates()
     familias_catalogo=familias_por_componentes()
-    codigos = sorted({sku for sku, familias in COMBOS.items() if 'core' in familias}
-                     | {sku for sku, familias in familias_catalogo.items() if 'core' in familias})
+    if ACTIVE_PROFILE=='2026-11':
+        codigos = sorted({'900473'} | {sku for sku, familias in familias_catalogo.items() if 'core' in familias})
+    else:
+        codigos = sorted({sku for sku, familias in COMBOS.items() if 'core' in familias}
+                         | {sku for sku, familias in familias_catalogo.items() if 'core' in familias})
     if not codigos:
         return directos
     combo = x.loc[x['sku'].isin(codigos), cols+['sku','bultos']].copy()
@@ -379,11 +411,19 @@ def mask_por_indicador(x):
     flags['core']=ordinary & sku.isin(INNOVACIONES_269)
     flags['ung']=ordinary & unidad.eq('UNG')
     flags['h2oh']=ordinary & (marca.eq('H2OH')|desc.str.contains('H2OH',regex=False))
-    flags['redbull']=ordinary & (marca.eq('RED BULL')|desc.str.contains('RED BULL|RB ZERO',regex=True))
+    if ACTIVE_PROFILE=='2026-11':
+        flags['redbull']=ordinary & (marca.eq('PEPSI BLACK')|desc.str.contains('PEPSI BLACK',regex=False))
+    else:
+        flags['redbull']=ordinary & (marca.eq('RED BULL')|desc.str.contains('RED BULL|RB ZERO',regex=True))
     familias_catalogo=familias_por_componentes()
     for k in flags:
-        combo_skus=({s for s,v in COMBOS.items() if k in v}
-                    | {s for s,v in familias_catalogo.items() if k in v})
+        if ACTIVE_PROFILE=='2026-11' and k=='core':
+            combo_skus=({'900473'} | {s for s,v in familias_catalogo.items() if k in v})
+        elif ACTIVE_PROFILE=='2026-11' and k=='redbull':
+            combo_skus=({'900397','900398','900408','900469'} | {s for s,v in familias_catalogo.items() if k in v})
+        else:
+            combo_skus=({s for s,v in COMBOS.items() if k in v}
+                        | {s for s,v in familias_catalogo.items() if k in v})
         if combo_skus:
             flags[k] = flags[k] | (is_combo & sku.isin(combo_skus))
     return flags,is_combo
@@ -424,7 +464,11 @@ def compute_sales(bultos:pd.DataFrame,padron:pd.DataFrame,desde=None,hasta=None,
         goal=OBJETIVOS[k]
         ratio=real/goal if real is not None else None
         coverage=real/len(padr) if k=='1890' and real is not None else None
-        if k=='core':estado=('PARCIAL · combos 900470 / 900473: CCC incluido; faltan SKU componentes' if (x['sku'].isin(('900470','900473')) & x['bultos'].gt(0)).any() else ('CALCULADO · Innovaciones 269 cc + Brahma FT' if pendientes_core.empty else 'PARCIAL · revisar combos de innovaciones'))
+        if k=='core':
+            if ACTIVE_PROFILE=='2026-11':
+                estado=('CALCULADO · Quilmes y Brahma 269 cc (incluye combos reconocidos)' if pendientes_core.empty else 'PARCIAL · revisar combos 269')
+            else:
+                estado=('PARCIAL · combos 900470 / 900473: CCC incluido; faltan SKU componentes' if (x['sku'].isin(('900470','900473')) & x['bultos'].gt(0)).any() else ('CALCULADO · Innovaciones 269 cc + Brahma FT' if pendientes_core.empty else 'PARCIAL · revisar combos de innovaciones'))
         elif k=='ung':estado=('PARCIAL · faltan SKU de '+str(len(combos_pendientes_ung))+' combos' if len(combos_pendientes_ung) else 'CALCULADO · cliente + SKU (incluye combos documentados)')
         elif k=='1890':estado='CALCULADO · combos 1890 sin composición confirmada'
         else:estado='CALCULADO · mapeo de combos conocidos'
@@ -466,8 +510,13 @@ def promotor_breakdown(x:pd.DataFrame, indicadores:list[str], padron:pd.DataFram
             pares,_=detalle_tbd_ung(x,por_promotor=True)
             serie=pares.groupby('promotor').size()
         elif ind=='core':
-            clientes_core=compradores_innovaciones_core(x,por_promotor=True)
-            serie=clientes_core.groupby('promotor')['cliente'].nunique()
+            if ACTIVE_PROFILE=='2026-11':
+                mask=flags[ind] & x['cliente'].ne('')
+                venta=x.loc[mask,['promotor','cliente','bultos']].groupby(['promotor','cliente'],as_index=False)['bultos'].sum()
+                serie=venta.loc[venta['bultos'].gt(0)].groupby('promotor')['cliente'].nunique()
+            else:
+                clientes_core=compradores_innovaciones_core(x,por_promotor=True)
+                serie=clientes_core.groupby('promotor')['cliente'].nunique()
         else:
             mask=flags[ind] & x['cliente'].ne('')
             if ind=='1890':
@@ -484,7 +533,12 @@ def promotor_breakdown(x:pd.DataFrame, indicadores:list[str], padron:pd.DataFram
         if ind=='ung':
             valor=len(detalle_tbd_ung(x)[0])
         elif ind=='core':
-            valor=compradores_innovaciones_core(x)['cliente'].nunique()
+            if ACTIVE_PROFILE=='2026-11':
+                mask=global_flags[ind] & x['cliente'].ne('')
+                venta=x.loc[mask,['cliente','bultos']].groupby('cliente',sort=False)['bultos'].sum()
+                valor=int(venta.gt(0).sum())
+            else:
+                valor=compradores_innovaciones_core(x)['cliente'].nunique()
         else:
             mask=global_flags[ind] & x['cliente'].ne('')
             if ind=='1890':mask=mask & x['cliente'].isin(padr)
