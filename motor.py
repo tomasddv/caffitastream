@@ -31,6 +31,7 @@ def set_runtime_profile(ym=None):
     global ACTIVE_PROFILE
     profile='2026-11' if tuple(ym or ())==(2026,11) else 'default'
     ACTIVE_PROFILE=profile
+    set_copy_aliases({})
     OBJETIVOS.clear(); OBJETIVOS.update(DEFAULT_OBJETIVOS)
     NOMBRES.clear(); NOMBRES.update(DEFAULT_NOMBRES)
     PROMOTOR_LABELS.clear(); PROMOTOR_LABELS.update(DEFAULT_PROMOTOR_LABELS)
@@ -125,6 +126,24 @@ COMBO_UNG_SKUS = {
     '900467': ('1418','1422','11522'),            # Gatorade K+T OCT
     '900469': ('25645','30663','30791','30974'),# PET 500 OCT PAT 4
 }
+
+# Las copias renombradas de combos del mes anterior heredan la composición
+# y familia del original, pero NO se escriben como filas duplicadas en el CSV.
+# Se recalculan por período y permanecen revisables en la vista del tablero.
+COMBOS_BASE=dict(COMBOS)
+COPIAS_AUTOMATICAS:dict[str,str]={}
+
+def set_copy_aliases(aliases:dict[str,str]|None=None):
+    """Activa copias de CHESS identificadas inequívocamente por descripción."""
+    COPIAS_AUTOMATICAS.clear()
+    COMBOS.clear();COMBOS.update(COMBOS_BASE)
+    for copia,original in (aliases or {}).items():
+        copia=str(copia)
+        original=str(original)
+        if copia in COMBOS_BASE or copia==original:
+            continue  # Un desglose explícito siempre tiene prioridad.
+        COPIAS_AUTOMATICAS[copia]=original
+        COMBOS[copia]=tuple(COMBOS_BASE.get(original,()))
 
 # Innovaciones Core confirmadas por el usuario (15/10/2026).
 INNOVACIONES_269 = {'63068': 'Quilmes Clásica 269 cc', '15624': 'Brahma 269 cc'}
@@ -223,6 +242,9 @@ def obtener_componentes_innovaciones():
         if grupo:
             codigo=str(r['codigo']).strip().lstrip('0')
             result.setdefault(codigo, {})[sku]=grupo
+    for copia,original in COPIAS_AUTOMATICAS.items():
+        if original in result:
+            result[copia]=dict(result[original])
     return result
 
 
@@ -236,6 +258,8 @@ def obtener_componentes_ung() -> dict[str, tuple[str, ...]]:
     componentes={k:tuple(dict.fromkeys(v)) for k,v in COMBO_UNG_SKUS.items()}
     path=RAIZ/'combo_componentes.csv'
     if not path.exists():
+        for copia,original in COPIAS_AUTOMATICAS.items():
+            if original in componentes:componentes[copia]=componentes[original]
         return componentes
     catalogo=pd.read_csv(path,dtype=str,encoding='utf-8-sig').fillna('')
     requeridas={'codigo','articulo_componente','unidad_negocio'}
@@ -253,6 +277,8 @@ def obtener_componentes_ung() -> dict[str, tuple[str, ...]]:
                 raise ValueError(f'Composición UNG contradictoria del combo {codigo}: catálogo y motor no coinciden.')
         else:
             componentes[codigo]=skus
+    for copia,original in COPIAS_AUTOMATICAS.items():
+        if original in componentes:componentes[copia]=componentes[original]
     return componentes
 
 
@@ -287,6 +313,8 @@ def familias_por_componentes() -> dict[str,set[str]]:
             if 'RED BULL' in marca or 'RED BULL' in desc:grupos.add('redbull')
             if clasificar_innovacion(sku,row['descripcion'],row['marca'],row['calibre'],row['division']):grupos.add('core')
         if grupos: found.setdefault(codigo,set()).update(grupos)
+    for copia,original in COPIAS_AUTOMATICAS.items():
+        if original in found:found[copia]=set(found[original])
     return found
 
 
@@ -384,7 +412,7 @@ def compradores_innovaciones_core(x:pd.DataFrame, por_promotor:bool=False) -> pd
         directos = pares[cols].drop_duplicates()
     familias_catalogo=familias_por_componentes()
     if ACTIVE_PROFILE=='2026-11':
-        codigos = sorted({'900473'} | {sku for sku, familias in familias_catalogo.items() if 'core' in familias})
+        codigos = sorted({'900473'} | {sku for sku, familias in familias_catalogo.items() if 'core' in familias} | {new for new,original in COPIAS_AUTOMATICAS.items() if original=='900473'})
     else:
         codigos = sorted({sku for sku, familias in COMBOS.items() if 'core' in familias}
                          | {sku for sku, familias in familias_catalogo.items() if 'core' in familias})
@@ -418,9 +446,15 @@ def mask_por_indicador(x):
     familias_catalogo=familias_por_componentes()
     for k in flags:
         if ACTIVE_PROFILE=='2026-11' and k=='core':
-            combo_skus=({'900473'} | {s for s,v in familias_catalogo.items() if k in v})
+            combo_skus=({'900473'} | {s for s,v in familias_catalogo.items() if k in v} | {nuevo for nuevo,original in COPIAS_AUTOMATICAS.items() if original=='900473'})
         elif ACTIVE_PROFILE=='2026-11' and k=='redbull':
-            combo_skus=({'900397','900398','900408','900469'} | {s for s,v in familias_catalogo.items() if k in v})
+            # Black: clasificar combos solo si ALGUNO de sus SKU es Pepsi Black.
+            # Evita contar combos de Pepsi común, como 900408, como Pepsi Black.
+            black_skus=set(x.loc[ordinary & (marca.eq('PEPSI BLACK') | desc.str.contains('PEPSI BLACK',regex=False)),'sku'])
+            black_skus.update({'30789','30790','30791','30793'})  # CHESS confirmado
+            combo_skus=({code for code,components in obtener_componentes_ung().items()
+                         if set(components) & black_skus}
+                        | {code for code,grupo in familias_catalogo.items() if k in grupo})
         else:
             combo_skus=({s for s,v in COMBOS.items() if k in v}
                         | {s for s,v in familias_catalogo.items() if k in v})

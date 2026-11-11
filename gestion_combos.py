@@ -57,6 +57,76 @@ def combos_sin_catalogar(x: pd.DataFrame, codigos_conocidos: set[str]) -> pd.Dat
     return out[['Código combo','Descripción','Clientes compradores','Bultos netos','Última compra']].reset_index(drop=True)
 
 
+
+def normalizar_nombre_combo(nombre:object) -> tuple[str,bool]:
+    """Quita prefijos COPIA repetidos y diferencias de puntuación/acentos.
+
+    No elimina palabras del producto ni el calibre; las coincidencias deben
+    identificar un original único en la venta del mes anterior.
+    """
+    import unicodedata
+    limpio=unicodedata.normalize('NFKD',str(nombre or '')).encode('ascii','ignore').decode('ascii').upper()
+    limpio=re.sub(r'[^A-Z0-9]+',' ',limpio).strip()
+    copia=False
+    while limpio.startswith('COPIA '):
+        copia=True
+        limpio=limpio[6:].strip()
+    return limpio,copia
+
+
+def detectar_copias_mes(actual:pd.DataFrame, anterior:pd.DataFrame, conocidos:set[str]):
+    """Reconoce COPIA por nombre de combo del mes anterior, no por código.
+
+    Solo autohereda composiciones/familias para coincidencia ÚNICA con un
+    original conocido. Cuando falta original o hay más de uno, deja pendiente.
+    Se admite un sufijo regional SUR añadido al nombre de la copia cuando
+    toda la descripción anterior restante coincide exactamente.
+
+    Returns:
+      mapeo {codigo_nuevo:codigo_original}, df_auto, df_pendientes.
+    """
+    def combos(d):
+        if d is None or d.empty:
+            return pd.DataFrame(columns=['sku','descripcion'])
+        return (d.loc[d['sku'].astype(str).str.fullmatch(r'900\d{3}'), ['sku','descripcion']]
+                .dropna(subset=['sku']).drop_duplicates(['sku','descripcion']))
+    prev=combos(anterior)
+    now=combos(actual)
+    by_name={}
+    for row in prev.itertuples(index=False):
+        key,_=normalizar_nombre_combo(row.descripcion)
+        if key:
+            by_name.setdefault(key,set()).add(str(row.sku))
+    mappings={}
+    auto=[]
+    unresolved=[]
+    for row in now.itertuples(index=False):
+        nuevo=cod(row.sku)
+        base,is_copy=normalizar_nombre_combo(row.descripcion)
+        if not is_copy or nuevo in conocidos or nuevo in mappings:
+            continue
+        candidates=by_name.get(base,set())
+        precision='Nombre idéntico (sin COPIA)'
+        if not candidates and base.endswith(' SUR'):
+            candidates=by_name.get(base[:-4],set())
+            precision='Mismo nombre; sufijo regional SUR'
+        if len(candidates)==1:
+            original=next(iter(candidates))
+            if original in conocidos and original!=nuevo:
+                mappings[nuevo]=original
+                auto.append({'Código copia':nuevo,'Descripción':row.descripcion,
+                             'Combo original':original,'Criterio':precision})
+                continue
+        if not candidates:
+            reason='No figura el mismo nombre en el mes anterior'
+        elif len(candidates)>1:
+            reason='Varios combos originales con el mismo nombre: '+', '.join(sorted(candidates))
+        else:
+            reason='El combo de origen no tiene clasificación ni desglose registrado'
+        unresolved.append({'Código copia':nuevo,'Descripción':row.descripcion,'Motivo':reason})
+    return (mappings, pd.DataFrame(auto,columns=['Código copia','Descripción','Combo original','Criterio']),
+            pd.DataFrame(unresolved,columns=['Código copia','Descripción','Motivo']))
+
 def referencia_articulos(x:pd.DataFrame) -> pd.DataFrame:
     """Catálogo sugerido desde SKU reales individuales, sin inventar componentes."""
     y = x.loc[~x['sku'].astype(str).str.fullmatch(r'900\d{3}')].copy()

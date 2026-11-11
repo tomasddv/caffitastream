@@ -182,6 +182,14 @@ def load_month(ym:tuple[int,int],vol_id:str|None,bul_id:str|None):
     raise ValueError(f'Para calcular {fm.periodo_nombre(ym)} faltan los TXT de volumen y bultos.')
 
 
+@st.cache_data(ttl=300,show_spinner=False)
+def catalogo_combos_mes_cerrado(vol_id:str,ym:tuple[int,int]):
+    """Nombres de combos del cierre anterior para reconocer COPIA en CHESS."""
+    base=fm.filtrar_y_validar_mes(leer_tsv(drive_txt(vol_id)),ym)
+    data=prepare(base)
+    return data.loc[data['sku'].astype(str).str.fullmatch(r'900\d{3}'),['sku','descripcion']].drop_duplicates()
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_reporte_clientes():
     # Misma fuente de Drive, archivo XLSX. Nunca se guarda una copia de clientes en GitHub.
@@ -305,10 +313,14 @@ with st.sidebar:
     _ddv_motor.set_runtime_profile(selected_ym)
     if st.button('🔄 Actualizar desde Drive',use_container_width=True):
         drive_txt.clear(); resolver_fuentes_mensuales.clear(); load_month.clear()
-        load_reporte_clientes.clear(); st.rerun()
+        catalogo_combos_mes_cerrado.clear(); load_reporte_clientes.clear(); st.rerun()
     st.caption('Se leen automáticamente los nombres de los TXT en la carpeta de Drive, sin mezclar meses. La caché vence a los 5 minutos.')
     st.metric('Padrón P1 + P4', f'{len(padron):,}'.replace(',','.'))
 
+copias_automaticas={}
+copias_reconocidas=pd.DataFrame()
+copias_por_revisar=pd.DataFrame()
+error_referencia_copias=''
 try:
     with st.spinner(f'Cargando {fm.periodo_nombre(selected_ym)} y clasificación de clientes desde Drive...'):
         fuentes,error_inventario=resolver_fuentes_mensuales(hoy_ar)
@@ -349,6 +361,24 @@ try:
         st.caption('📈 **Avance del mes corriente:** solamente ventas de '+fm.periodo_nombre(current_ym)+'.')
     else:
         st.caption('🔒 **Cierre del mes anterior:** solamente ventas de '+fm.periodo_nombre(previous_ym)+'.')
+    # Regla CHESS validada: todo combo que empieza con COPIA reutiliza el
+    # desglose/familia del mismo nombre del mes anterior, cuando el cruce es único.
+    # Se hace ANTES de calcular CCC y TBD; los nuevos códigos no afectan octubre.
+    _ddv_motor.set_copy_aliases({})
+    anterior_busqueda=fm.mes_anterior(date(selected_ym[0],selected_ym[1],1))
+    cierre_anterior=fuentes.get(anterior_busqueda,{})
+    if selected_ym==current_ym and cierre_anterior.get('volumen'):
+        try:
+            ref_mes_anterior=catalogo_combos_mes_cerrado(cierre_anterior['volumen'],anterior_busqueda)
+            catalogo_componente=gc.leer_catalogo(BASE/'combo_componentes.csv')
+            conocidos=set(_ddv_motor.COMBOS)|set(catalogo_componente['codigo'].map(gc.cod))
+            copias_automaticas,copias_reconocidas,copias_por_revisar=gc.detectar_copias_mes(
+                prep.loc[prep['fecha'].dt.date.between(desde,hasta)],ref_mes_anterior,conocidos)
+            _ddv_motor.set_copy_aliases(copias_automaticas)
+        except Exception as exc:
+            error_referencia_copias=str(exc)
+    elif selected_ym==current_ym:
+        error_referencia_copias='No está disponible el archivo ventadiaria del mes anterior en Drive.'
     rows,detail,combos,xf=compute_sales(bultos,padron_activo,desde,hasta,excluir_clientes=excluidos_people)
     rows=armonizar_rows_periodo(rows,selected_ym,len(padron_activo))
     detail=enriquecer_padron_1890(detail,reporte_clientes)
@@ -369,6 +399,24 @@ if valid_ok:
         codigos_catalogados=set(catalogo_actual['codigo'].map(gc.cod))
         codigos_conocidos=set(_ddv_motor.COMBOS)|codigos_catalogados
         ventas_alerta=prep.loc[prep['fecha'].dt.date.between(desde,hasta)].copy()
+        if error_referencia_copias:
+            st.warning('No pude comprobar las copias del mes anterior. Podrían mostrarse como pendientes. '+error_referencia_copias)
+        if not copias_reconocidas.empty:
+            st.success(f'✅ {len(copias_reconocidas)} combos COPIA reconocidos automáticamente por su original del mes anterior. Ya se incluyen en los CCC/TBD correspondientes.')
+            with st.expander('🔁 Ver equivalencias automáticas de combos COPIA'):
+                copias_ver=copias_reconocidas.copy()
+                umap=_ddv_motor.obtener_componentes_ung()
+                catalogados=set(catalogo_actual['codigo'])
+                copias_ver['SKU UNG heredados']=copias_ver['Código copia'].map(lambda x:len(umap.get(x,())))
+                copias_ver['Detalle']=copias_ver['Combo original'].map(
+                    lambda source:'Desglose de SKU en catálogo' if source in catalogados or source in _ddv_motor.COMBO_UNG_SKUS
+                    else 'Familia comercial identificada; componentes por verificar')
+                st.dataframe(copias_ver,use_container_width=True,hide_index=True)
+                st.caption('Las copias heredan la clasificación del código original; no se crean SKU ficticios ni se duplica el cliente.')
+        if not copias_por_revisar.empty:
+            st.warning(f'Hay {len(copias_por_revisar)} combos COPIA cuyo origen no se pudo identificar con seguridad. Revisalos manualmente.')
+            with st.expander('Ver copias que requieren validación'):
+                st.dataframe(copias_por_revisar,use_container_width=True,hide_index=True)
         combos_nuevos=gc.combos_sin_catalogar(ventas_alerta,codigos_conocidos)
         if not combos_nuevos.empty:
             cantidad=len(combos_nuevos)
@@ -383,8 +431,8 @@ if valid_ok:
         codigos_nuevos=combos_nuevos['Código combo'].tolist()
         opciones=codigos_nuevos+sorted(set(codigos_vendidos)-set(codigos_nuevos))
         with st.expander('🧩 Registrar composición de combos · detección automática y carga manual',expanded=bool(codigos_nuevos)):
-            st.caption('La alerta examina TODOS los combos vendidos en el TXT del período, incluso si el comprador es CLIE PEOPLE. '
-                       'Los CCC/TBD mantienen su exclusión habitual. Los SKU se validan contra el archivo y también se pueden completar manualmente.')
+            st.caption('Los combos que comienzan con COPIA se asocian al original de igual nombre del mes anterior y no requieren una carga nueva. '
+                       'El resto sigue sujeto a revisión. La detección examina todos los combos vendidos, pero los indicadores excluyen CLIE PEOPLE.')
             if not combos_nuevos.empty:
                 st.dataframe(combos_nuevos,use_container_width=True,hide_index=True)
             if opciones:
