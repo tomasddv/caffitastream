@@ -58,7 +58,7 @@ except Exception as _startup_error:
 (DIA_ID, BULTOS_ID, NOMBRES, OBJETIVOS, leer_tsv, prepare, compute_sales,
  detalle_tbd_ung, detalle_innovaciones, compradores_innovaciones_core,
  validate_reconciliation, promotor_breakdown, PROMOTOR_LABELS) = (
-    getattr(_ddv_motor, name) for name in _ENGINE_EXPORTS
+   getattr(_ddv_motor, name) for name in _ENGINE_EXPORTS[:13]
 )
 from reporte_clientes import (
     REPORTE_CLIENTES_ID, leer_reporte_clientes_xlsx, enriquecer_padron_1890,
