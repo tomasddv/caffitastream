@@ -29,7 +29,7 @@ _ENGINE_EXPORTS = (
     'DIA_ID', 'BULTOS_ID', 'NOMBRES', 'OBJETIVOS', 'leer_tsv', 'prepare',
     'compute_sales', 'detalle_tbd_ung', 'detalle_innovaciones',
     'compradores_innovaciones_core', 'validate_reconciliation',
-    'promotor_breakdown', 'PROMOTOR_LABELS',
+    'promotor_breakdown', 'PROMOTOR_LABELS', 'set_runtime_profile', 'set_copy_aliases',
 )
 try:
     import motor as _ddv_motor
@@ -37,13 +37,22 @@ try:
     _expected_motor = (BASE / 'motor.py').resolve()
     if _actual_motor != _expected_motor:
         raise RuntimeError('Se encontró otro módulo motor distinto al del repositorio.')
+    # Verificar todas las funciones que esta versión de app.py necesita.
+    # Streamlit puede conservar en memoria un módulo importado antes de que
+    # termine un redeploy; intentar releer el motor desde el archivo actualizado.
     _missing = [name for name in _ENGINE_EXPORTS if not hasattr(_ddv_motor, name)]
     if _missing:
-        raise RuntimeError('Faltan elementos del motor: ' + ', '.join(_missing))
-except Exception:
+        import importlib
+        _ddv_motor = importlib.reload(_ddv_motor)
+        _missing = [name for name in _ENGINE_EXPORTS if not hasattr(_ddv_motor, name)]
+        if _missing:
+            raise RuntimeError('Funciones faltantes en motor.py: ' + ', '.join(_missing))
+except Exception as _startup_error:
     st.set_page_config(page_title='DDV | Revisión del despliegue', page_icon='⚠️')
-    st.error('No se pudo cargar el motor de indicadores. Los archivos app.py y motor.py deben ser de la misma versión.')
-    st.info('Subí todos los archivos del ZIP descomprimido a la raíz de GitHub en un único commit, y reiniciá la aplicación desde Manage app → Reboot app.')
+    st.error('La versión del motor de indicadores no coincide con la de la aplicación.')
+    st.warning('No se muestran resultados porque podría calcularse incorrectamente la composición de los combos.')
+    st.code(str(_startup_error))
+    st.info('Reemplazá **app.py y motor.py juntos** desde el mismo parche y usá Manage app → Reboot app. No hace falta reemplazar combo_componentes.csv.')
     st.stop()
 
 (DIA_ID, BULTOS_ID, NOMBRES, OBJETIVOS, leer_tsv, prepare, compute_sales,
