@@ -21,7 +21,13 @@ def codigo_cliente(valor: object) -> str:
         cadena = cadena.split('.')[0]
     if not cadena.isdigit():
         return ''
-    if cadena.startswith(PREFIJO_BEES) and len(cadena) > len(PREFIJO_BEES):
+    # B2B de DDV: 07054900 + código de cliente de 6 dígitos.
+    # Los Excel a veces convierten 07054900002674 en 7054900002674.
+    if len(cadena) == 13 and cadena.startswith('7054900'):
+        cadena = '0' + cadena
+    if len(cadena) == 14 and cadena.startswith('07054900'):
+        cadena = cadena[8:]  # Conserva los 6 dígitos antes de quitar ceros.
+    elif cadena.startswith(PREFIJO_BEES) and len(cadena) > len(PREFIJO_BEES):
         cadena = cadena[len(PREFIJO_BEES):]
     return str(int(cadena)) if cadena else ''
 
