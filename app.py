@@ -24,6 +24,7 @@ sys.path.insert(0, str(BASE))
 from padron import cargar_padron
 import gestion_combos as gc
 import fuentes_mensuales as fm
+import comparacion_mtd as cm
 
 _ENGINE_EXPORTS = (
     'DIA_ID', 'BULTOS_ID', 'NOMBRES', 'OBJETIVOS', 'leer_tsv', 'prepare',
@@ -58,7 +59,7 @@ except Exception as _startup_error:
 (DIA_ID, BULTOS_ID, NOMBRES, OBJETIVOS, leer_tsv, prepare, compute_sales,
  detalle_tbd_ung, detalle_innovaciones, compradores_innovaciones_core,
  validate_reconciliation, promotor_breakdown, PROMOTOR_LABELS) = (
-   getattr(_ddv_motor, name) for name in _ENGINE_EXPORTS[:13]
+    getattr(_ddv_motor, name) for name in _ENGINE_EXPORTS[:13]
 )
 from reporte_clientes import (
     REPORTE_CLIENTES_ID, leer_reporte_clientes_xlsx, enriquecer_padron_1890,
@@ -215,7 +216,24 @@ def fnum(v):
     return f'{v:,.0f}'.replace(',','.')
 
 
-def cards_html(results):
+def vs_mes_html(k:str, comparacion:dict[str,dict]|None, fecha_referencia:date|None):
+    """Comparativo acumulado por tarjeta. Un origen sin datos nunca se presenta como cero."""
+    if not comparacion or k not in comparacion or fecha_referencia is None:
+        return '<div class="vs-mtd"><span>VS MES ANTERIOR · SIN DATOS</span></div>'
+    dato=comparacion[k]
+    if dato.get('anterior') is None or dato.get('actual') is None:
+        return '<div class="vs-mtd"><span>VS MES ANTERIOR · SIN DATOS</span></div>'
+    anterior=int(dato['anterior']);actual=int(dato['actual']);delta=int(dato['delta'])
+    delta_text=('+' if delta>0 else '')+fnum(delta)
+    pct=('sin base %' if anterior==0 else '—') if dato['delta_pct'] is None else (
+        ('+' if dato['delta_pct']>0 else '')+f"{dato['delta_pct']:.1%}".replace('.',','))
+    advertencia=' · PROVISORIO' if dato.get('provisional') else ''
+    return (f'<div class="vs-mtd"><span>VS {fecha_referencia:%d/%m/%Y}{advertencia}</span>'
+            f'<strong>Anterior {fnum(anterior)} · MTD {fnum(actual)}</strong>'
+            f'<strong>Δ {delta_text} ({pct})</strong></div>')
+
+
+def cards_html(results,comparacion=None,fecha_referencia=None):
     out=[]
     for d in results:
         pct='—' if d['alcance'] is None else f'{d["alcance"]:.0%}'
@@ -228,6 +246,7 @@ def cards_html(results):
         out.append(f'''<article class="card"><div class="img"><img src="{picture(d['id'])}" alt="{html.escape(d['nombre'])}"/></div>
         <div class="heading">{html.escape(d['nombre'])}</div><div class="stats">{cells}
         <div class="bar"><div style="width:{progress:.1f}%;background:{color}"></div></div>
+        {vs_mes_html(d['id'],comparacion,fecha_referencia)}
         <p>{html.escape(d['estado'])}</p></div></article>''')
     return ''.join(out)
 
@@ -240,6 +259,8 @@ STYLE='''<style>*{box-sizing:border-box;color:#000}body{font:14px Arial,sans-ser
 .stats{padding:8px 11px}.line{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e6edf2;padding:6px 0;font-size:13px;gap:6px}
 .line strong{font-size:14px;color:#000}.line strong.attention{color:#000}
 .bar{height:5px;border-radius:6px;background:#e7edf3;margin:10px 0 8px;overflow:hidden}.bar div{height:100%}
+.vs-mtd{border-top:1px solid #dde5ee;padding-top:7px;margin-top:5px;display:flex;flex-direction:column;gap:2px;line-height:1.3;min-height:56px}
+.vs-mtd span{font-size:10px;font-weight:700;color:#000}.vs-mtd strong{font-size:11px;color:#000;overflow-wrap:anywhere}
 p{margin:0;min-height:27px;font-size:10px;color:#000}
 @media(max-width:1050px){.group{display:flex;overflow-x:auto}.card{min-width:185px;flex:1}}</style>'''
 
@@ -401,6 +422,45 @@ except Exception as e:
     detail=None; combos=None; valid_ok=False; xf=None; ultimo=None; reporte_ok=False; reporte_error=""
     excluidos_people=set(); excluidos_p1p4=0; padron_activo=padron; cierre_parcial=False
 
+# VS MTD: mismo número de día, mismos criterios comerciales del mes seleccionado.
+# Para 1890 cada mes usa su padrón histórico, y CLIE PEOPLE se excluye de ambos.
+comparacion_mtd={}
+fecha_comparacion=None
+comparacion_estado='Sin mes previo disponible'
+comparacion_provisional=False
+if valid_ok:
+    try:
+        inicio_mtd=date(selected_ym[0], selected_ym[1], 1)
+        # La pantalla puede estar filtrada a un rango parcial; el VS siempre empieza el día 1.
+        if desde>inicio_mtd:
+            mtd_rows,_,_,_=compute_sales(bultos,padron_activo,inicio_mtd,hasta,
+                                         excluir_clientes=excluidos_people)
+        else:
+            mtd_rows=rows
+        ym_referencia=cm.mes_previo(selected_ym)
+        inicio_ref,fin_ref=cm.rango_referencia(selected_ym,hasta)
+        referencia_fuentes=fuentes.get(ym_referencia)
+        if referencia_fuentes and referencia_fuentes.get('volumen'):
+            _,ref_bultos,ref_provisional=load_month(
+                ym_referencia,referencia_fuentes.get('volumen'),referencia_fuentes.get('bultos'))
+            ref_padron=cargar_padron_periodo(ym_referencia)
+            ref_padron=filtrar_padron_people(ref_padron,excluidos_people)
+            # Deliberadamente NO cambiar set_runtime_profile: Pepsi Black y CCC 269
+            # deben contrastarse con las mismas familias en el mes anterior.
+            ref_rows,_,_,_=compute_sales(ref_bultos,ref_padron,inicio_ref,fin_ref,
+                                         excluir_clientes=excluidos_people)
+            comparacion_mtd=cm.variaciones(mtd_rows,ref_rows,provisional=ref_provisional)
+            fecha_comparacion=fin_ref
+            comparacion_provisional=ref_provisional
+            comparacion_estado=('Provisional: falta el TXT histórico de bultos' if ref_provisional
+                                else 'Fuentes verificadas')
+        else:
+            comparacion_estado='No hay ventas del mes anterior disponibles en Drive'
+    except Exception as error_vs:
+        # El histórico nunca debe bloquear los resultados actuales.
+        comparacion_mtd={};fecha_comparacion=None
+        comparacion_estado='No se pudo calcular el mes anterior: '+str(error_vs)
+
 # La alerta no agrega solapas: permanece visible arriba de los tres tableros.
 if valid_ok:
     try:
@@ -514,17 +574,34 @@ if valid_ok:
 tab_general, tab_promotor, tab_ranking = st.tabs(['📊 Indicadores generales','👥 CCC y TBD por promotor','🏆 Ranking'])
 
 with tab_general:
-    components.html(STYLE+'<div class="group" style="--n:3">'+cards_html(rows[:3])+'</div><div class="group" style="--n:7">'+cards_html(rows[3:])+'</div>',height=640,scrolling=True)
+    st.caption('**VS mes anterior · mismo día:** acumulado desde el día 1 de cada mes, usando la misma definición comercial. El padrón de 1890 corresponde a cada mes histórico.')
+    if valid_ok and comparacion_provisional:
+        st.warning('VS mes anterior **provisorio**: no existe `ventadiaria bultos octubre.txt` en Drive. La referencia usa ventas por volumen y puede diferir del cierre auditado.')
+    elif valid_ok and not comparacion_mtd:
+        st.info('VS mes anterior sin datos: '+comparacion_estado)
+    components.html(STYLE+'<div class="group" style="--n:3">'+cards_html(rows[:3],comparacion_mtd,fecha_comparacion)+'</div><div class="group" style="--n:7">'+cards_html(rows[3:],comparacion_mtd,fecha_comparacion)+'</div>',height=805,scrolling=True)
     if valid_ok:
         st.caption(f'Exclusión automática: {len(excluidos_people)} clientes CLIE PEOPLE fuera de TODOS los indicadores; {excluidos_p1p4} pertenecían al padrón P1/P4. Objetivos comerciales sin modificar.')
         summary=pd.DataFrame(rows)
         st.caption(f'Período: **{fm.periodo_nombre(selected_ym)}** · Selección: **{desde:%d/%m/%Y} al {hasta:%d/%m/%Y}** · {len(xf):,} registros evaluados'.replace(',','.'))
         st.subheader('Seguimiento y detalle')
         resumen_vista=summary[['nombre','objetivo','real','alcance','faltan','cobertura','estado']].copy()
+        resumen_vista['MTD hasta corte']=None
+        resumen_vista['Mes anterior mismo día']=None
+        resumen_vista['Variación vs mes anterior']=None
+        resumen_vista['Variación %']=None
+        for idx,row in summary.iterrows():
+            dato=comparacion_mtd.get(row['id'])
+            if dato and dato['actual'] is not None and dato['anterior'] is not None:
+                resumen_vista.at[idx,'MTD hasta corte']=int(dato['actual'])
+                resumen_vista.at[idx,'Mes anterior mismo día']=int(dato['anterior'])
+                resumen_vista.at[idx,'Variación vs mes anterior']=int(dato['delta'])
+                resumen_vista.at[idx,'Variación %']=(f"{dato['delta_pct']:+.1%}".replace('.',',')
+                    if dato['delta_pct'] is not None else 'Sin base')
         for campo in ['alcance','cobertura']:
             resumen_vista[campo]=resumen_vista[campo].map(lambda v:f'{v:.1%}' if pd.notna(v) else '—')
         st.dataframe(resumen_vista,use_container_width=True,hide_index=True)
-        st.download_button('Descargar indicadores CSV',summary.to_csv(index=False).encode('utf-8-sig'),file_name='ddv_indicadores.csv',mime='text/csv')
+        st.download_button('Descargar indicadores CSV',resumen_vista.to_csv(index=False).encode('utf-8-sig'),file_name='ddv_indicadores_con_vs_mensual.csv',mime='text/csv')
 
         core_titulo='CCC 269' if selected_ym==(2026,11) else 'Innovaciones Core · Brahma y Quilmes 269 cc + Brahma FT'
         core_caption=('Real = clientes únicos con compra neta positiva de Brahma y Quilmes 269 cc. Un mismo cliente cuenta una sola vez, aunque compre varios SKU y bultos.' if selected_ym==(2026,11) else 'Real = clientes únicos con compra neta positiva de cualquier innovación. Un mismo cliente cuenta una sola vez, aunque compre varios SKU y bultos.')
