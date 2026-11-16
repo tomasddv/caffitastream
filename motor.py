@@ -180,7 +180,10 @@ def leer_tsv(raw:bytes):
 
 
 def decimal(s):
-    return pd.to_numeric(s.astype(str).str.replace('.','',regex=False).str.replace(',','.',regex=False),errors='coerce').fillna(0)
+    text=s.astype(str).str.strip()
+    comma=text.str.contains(',',regex=False,na=False)
+    text=text.where(~comma,text.str.replace('.','',regex=False).str.replace(',','.',regex=False))
+    return pd.to_numeric(text,errors='coerce').fillna(0)
 
 
 def prepare(df):
@@ -586,6 +589,20 @@ def promotor_breakdown(x:pd.DataFrame, indicadores:list[str], padron:pd.DataFram
 def validate_reconciliation(vol:pd.DataFrame,bul:pd.DataFrame):
     keys=['Descripción Período','Cod. Cliente','Código','Importes Netos']
     if len(vol)!=len(bul):return False,'Las fuentes tienen diferente cantidad de filas.'
+    def canonical(df):
+        result=df[keys].copy()
+        result[keys[0]]=prepare(df)['fecha'].dt.strftime('%Y-%m-%d')
+        for key in keys[1:3]:
+            result[key]=result[key].astype(str).str.strip().str.replace(r'\.0$', '',regex=True).str.lstrip('0')
+        amounts=df[keys[3]].astype(str).str.strip()
+        comma=amounts.str.contains(',',regex=False,na=False)
+        amounts=amounts.where(~comma,amounts.str.replace('.','',regex=False).str.replace(',','.',regex=False))
+        result[keys[3]]=pd.to_numeric(amounts,errors='coerce').round(2)
+        if result[keys[0]].isna().any() or result[keys[3]].isna().any():
+            raise ValueError('Hay fechas o importes invalidos en los TXT')
+        return result
+    vol=canonical(vol)
+    bul=canonical(bul)
     if not vol[keys].reset_index(drop=True).equals(bul[keys].reset_index(drop=True)):
         av=vol[keys].value_counts(dropna=False).sort_index()
         ab=bul[keys].value_counts(dropna=False).sort_index()
