@@ -319,6 +319,8 @@ def promotor_table_html(df: pd.DataFrame):
     html_table=style+"<div class='prom-wrap'><table class='prom'><thead><tr>"+head+"</tr></thead><tbody>"+''.join(body)+"</tbody></table></div>"
     return html_table
 
+from command_theme import apply_theme
+apply_theme()
 st.title('Distribuidora del Valle | Indicadores comerciales')
 st.caption('Fuente: Drive · Mes corriente o cierre del mes anterior · Incluye combos conocidos · Padrón P1 + P4')
 def cargar_padron_periodo(ym:tuple[int,int]):
