@@ -285,6 +285,21 @@ def obtener_componentes_ung() -> dict[str, tuple[str, ...]]:
     return componentes
 
 
+def mascara_pepsi_black(sku:pd.Series, marca:pd.Series, descripcion:pd.Series)->pd.Series:
+    """Identifica Pepsi Black aunque CHESS marque la familia 2250 como PEPSI.
+
+    SKU 13950: PEPSI PET X8 2250 BLACK / marca PEPSI, verificado en ventas.
+    Se exige presencia de PEPSI y BLACK en nombre o marca (o SKU 13950),
+    para evitar identificar Pepsi regular o cualquier producto negro ajeno.
+    """
+    marca=marca.fillna('').astype(str).str.upper()
+    descripcion=descripcion.fillna('').astype(str).str.upper()
+    sku=sku.fillna('').astype(str)
+    texto=marca+' '+descripcion
+    return (sku.eq('13950') | (texto.str.contains(r'\bPEPSI\b',regex=True)
+                               & texto.str.contains(r'\bBLACK\b',regex=True)))
+
+
 def familias_por_componentes() -> dict[str,set[str]]:
     """Familias comerciales derivadas ÚNICAMENTE del desglose SKU del ERP."""
     path=RAIZ/'combo_componentes.csv'
@@ -310,7 +325,8 @@ def familias_por_componentes() -> dict[str,set[str]]:
         if re.search(r'\b710 CC LATAS\b',calibre):grupos.add('latones')
         if marca=='H2OH' or 'H2OH' in desc:grupos.add('h2oh')
         if ACTIVE_PROFILE=='2026-11':
-            if 'PEPSI BLACK' in marca or 'PEPSI BLACK' in desc:grupos.add('redbull')
+            if sku=='13950' or ('PEPSI' in (marca+' '+desc) and 'BLACK' in (marca+' '+desc)):
+                grupos.add('redbull')
             if sku in INNOVACIONES_269:grupos.add('core')
         else:
             if 'RED BULL' in marca or 'RED BULL' in desc:grupos.add('redbull')
@@ -441,9 +457,11 @@ def mask_por_indicador(x):
     flags['latones']=ordinary & cal.str.contains(r'710\s*CC\s*LATAS',regex=True)
     flags['core']=ordinary & sku.isin(INNOVACIONES_269)
     flags['ung']=ordinary & unidad.eq('UNG')
-    flags['h2oh']=ordinary & (marca.eq('H2OH')|desc.str.contains('H2OH',regex=False))
+    # H2OH! directo: incluir sus variantes de escritura, conservar neteo de devoluciones.
+    flags['h2oh']=ordinary & (marca.str.contains(r'H2OH|H2O!',regex=True)
+                               | desc.str.contains(r'H2OH|H2O!',regex=True))
     if ACTIVE_PROFILE=='2026-11':
-        flags['redbull']=ordinary & (marca.eq('PEPSI BLACK')|desc.str.contains('PEPSI BLACK',regex=False))
+        flags['redbull']=ordinary & mascara_pepsi_black(sku,marca,desc)
     else:
         flags['redbull']=ordinary & (marca.eq('RED BULL')|desc.str.contains('RED BULL|RB ZERO',regex=True))
     familias_catalogo=familias_por_componentes()
@@ -453,8 +471,8 @@ def mask_por_indicador(x):
         elif ACTIVE_PROFILE=='2026-11' and k=='redbull':
             # Black: clasificar combos solo si ALGUNO de sus SKU es Pepsi Black.
             # Evita contar combos de Pepsi común, como 900408, como Pepsi Black.
-            black_skus=set(x.loc[ordinary & (marca.eq('PEPSI BLACK') | desc.str.contains('PEPSI BLACK',regex=False)),'sku'])
-            black_skus.update({'30789','30790','30791','30793'})  # CHESS confirmado
+            black_skus=set(x.loc[ordinary & mascara_pepsi_black(sku,marca,desc),'sku'])
+            black_skus.update({'13950','30789','30790','30791','30793'})  # SKU confirmados en CHESS/ventas
             combo_skus=({code for code,components in obtener_componentes_ung().items()
                          if set(components) & black_skus}
                         | {code for code,grupo in familias_catalogo.items() if k in grupo})

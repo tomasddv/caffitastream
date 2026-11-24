@@ -1,0 +1,39 @@
+DDV | CORRECCION CCC BLACK / AUDITORIA H2OH!
+Corte de validacion: ventas de noviembre hasta 24/11/2026.
+
+PARCHE: solo reemplaza app.py y motor.py en la RAIZ de tu repo de GitHub.
+
+Cambios:
+  * BLACK: reconoce el SKU 13950 (Pepsi 2250 Black) aunque la marca en CHESS sea PEPSI.
+  * BLACK: las copias/combos suman solo si algun SKU componente es realmente Black.
+    Pepsi comun no suma a CCC BLACK.
+  * H2OH!: acepta sus variantes de nombre, respeta combos registrados, copias, netos
+    y devoluciones. No altera manualmente el numero sin evidencia.
+  * Auditoria: en 'Indicadores generales' -> 'Auditoria CCC BLACK y H2OH!' podes
+    ver y descargar clientes, nombre de fantasia, promotor, SKU y combos que forman
+    cada resultado, con netos. La auditoria compara sus compradores con la tarjeta.
+  * VS mes anterior: utiliza el mismo motor corregido en ambos periodos.
+
+IMPORTANTE: NO reemplaces combo_componentes.csv, los archivos de padron, las imagenes,
+ni los secretos de Streamlit. El proyecto conserva la exclusion CLIE PEOPLE y el
+reconocimiento automatico de combos COPIA.
+
+INSTRUCCIONES:
+  1. Extraer el ZIP en tu computadora.
+  2. Abrir https://github.com/tomasddv/caffitastream
+  3. Add file > Upload files y reemplazar SOLO app.py y motor.py.
+  4. Commit changes en rama main.
+  5. Streamlit -> Manage app -> Reboot app.
+  6. En 'Indicadores generales' revisar CCC BLACK y CCC H2OH! y la auditoria.
+
+VALIDACION LOCAL (24/11/2026, excluyendo CLIE PEOPLE):
+  CCC BLACK: 332 compradores (antes: 292; incluye 13950).
+  CCC H2OH!: 298 compradores.
+  27.870 filas: TXT de venta y bultos coinciden.
+  73 pruebas automatizadas aprobadas (incluyendo pruebas nuevas de ambos CCC).
+
+LIMITACION:
+  La cifra 298 de H2OH! surge de las ventas y combos identificados. Si el informe
+  comercial oficial tiene otra cifra, comparar sus clientes/SKU con la descarga
+  para ubicar la diferencia sin modificar artificialmente el total.
+  Streamlit Cloud se debe comprobar despues del despliegue.

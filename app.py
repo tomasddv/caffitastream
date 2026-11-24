@@ -319,8 +319,6 @@ def promotor_table_html(df: pd.DataFrame):
     html_table=style+"<div class='prom-wrap'><table class='prom'><thead><tr>"+head+"</tr></thead><tbody>"+''.join(body)+"</tbody></table></div>"
     return html_table
 
-from command_theme import apply_theme
-apply_theme()
 st.title('Distribuidora del Valle | Indicadores comerciales')
 st.caption('Fuente: Drive · Mes corriente o cierre del mes anterior · Incluye combos conocidos · Padrón P1 + P4')
 def cargar_padron_periodo(ym:tuple[int,int]):
@@ -604,6 +602,44 @@ with tab_general:
             resumen_vista[campo]=resumen_vista[campo].map(lambda v:f'{v:.1%}' if pd.notna(v) else '—')
         st.dataframe(resumen_vista,use_container_width=True,hide_index=True)
         st.download_button('Descargar indicadores CSV',resumen_vista.to_csv(index=False).encode('utf-8-sig'),file_name='ddv_indicadores_con_vs_mensual.csv',mime='text/csv')
+
+        # Conciliación comprobable por comprador: la tabla usa exactamente las
+        # mismas máscaras y netos que el motor general, sin otros KPI ni nuevas solapas.
+        with st.expander('🔎 Auditoría CCC BLACK y H2OH! · clientes, SKU y combos'):
+            st.caption('Mismo rango que los KPI generales. CLIE PEOPLE excluidos. Un cliente suma 1 si su volumen neto de la familia es positivo; devoluciones incluidas. Los combos aparecen por código, y las copias heredan la familia del original confirmado.')
+            nombre_negro='CCC BLACK' if selected_ym==(2026,11) else 'CCC RED BULL'
+            indicador_auditar=st.selectbox('Indicador', [nombre_negro,'CCC H2OH!'],key='auditoria_ccc_categoria')
+            k_auditar='redbull' if indicador_auditar==nombre_negro else 'h2oh'
+            flags_auditar,combos_auditar=_ddv_motor.mask_por_indicador(xf)
+            detalle_auditado=xf.loc[
+                flags_auditar[k_auditar] & xf['cliente'].ne(''),
+                ['cliente','sku','descripcion','promotor','bultos']
+            ].copy()
+            detalle_auditado['Origen']=detalle_auditado['sku'].str.match(r'^900\d{3}$').map(
+                {True:'Combo', False:'SKU directo'})
+            clientes_netos=detalle_auditado.groupby('cliente')['bultos'].sum()
+            compradores_validos=set(clientes_netos[clientes_netos.gt(0)].index)
+            detalle_auditado=detalle_auditado.loc[detalle_auditado['cliente'].isin(compradores_validos)]
+            detalle_auditado=(detalle_auditado.groupby(
+                ['cliente','sku','descripcion','promotor','Origen'],as_index=False)['bultos'].sum())
+            detalle_auditado['Neto de la familia por cliente']=detalle_auditado['cliente'].map(clientes_netos)
+            fantasia=reporte_clientes.set_index('cliente_codigo')['nombre_fantasia'].to_dict()
+            detalle_auditado['Nombre de fantasía']=detalle_auditado['cliente'].map(fantasia).fillna('Sin dato en reporte')
+            detalle_auditado=detalle_auditado.rename(columns={
+                'cliente':'Código cliente','sku':'Código SKU / combo',
+                'descripcion':'Descripción','promotor':'Promotor','bultos':'Bultos netos línea'})
+            visible=['Código cliente','Nombre de fantasía','Promotor','Código SKU / combo',
+                     'Descripción','Origen','Bultos netos línea','Neto de la familia por cliente']
+            detalle_auditado=detalle_auditado[visible].sort_values(['Código cliente','Código SKU / combo'])
+            real_tarjeta=next(r['real'] for r in rows if r['id']==k_auditar)
+            st.metric('Clientes únicos con compra neta positiva',len(compradores_validos))
+            if len(compradores_validos)!=real_tarjeta:
+                st.error('La auditoría no coincide con la tarjeta: revisá el motor antes de usar este resultado.')
+            st.dataframe(detalle_auditado,use_container_width=True,hide_index=True,height=350)
+            st.download_button('📥 Descargar compradores y SKU para auditar',
+                detalle_auditado.to_csv(index=False).encode('utf-8-sig'),
+                file_name=f'auditoria_ccc_{k_auditar}_{selected_ym[0]}_{selected_ym[1]:02d}.csv',
+                mime='text/csv',key='csv_auditoria_black_h2oh')
 
         core_titulo='CCC 269' if selected_ym==(2026,11) else 'Innovaciones Core · Brahma y Quilmes 269 cc + Brahma FT'
         core_caption=('Real = clientes únicos con compra neta positiva de Brahma y Quilmes 269 cc. Un mismo cliente cuenta una sola vez, aunque compre varios SKU y bultos.' if selected_ym==(2026,11) else 'Real = clientes únicos con compra neta positiva de cualquier innovación. Un mismo cliente cuenta una sola vez, aunque compre varios SKU y bultos.')
